@@ -243,7 +243,7 @@ export function EvidenceUploader({
                     <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-2xs font-semibold text-sky-800">Synthetic demo data</span>
                   )}
                 </summary>
-                <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-100 bg-stone-50 p-3 text-xs leading-5 text-slate-700">{source.rawContent}</pre>
+                <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border border-slate-100 bg-stone-50 p-3 text-xs leading-5 text-slate-700">{source.rawContent}</pre>
                 {Array.isArray(source.metadata.normalizationWarnings) && source.metadata.normalizationWarnings.length > 0 && (
                   <p className="mt-2 text-xs text-amber-800">
                     {source.metadata.normalizationWarnings.join(" ")} The original above is unchanged.

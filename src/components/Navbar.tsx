@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { ShieldCheck, Cpu, AlertTriangle, Settings2 } from "lucide-react";
+import { ShieldCheck, Cpu, AlertTriangle, Settings2, Database } from "lucide-react";
 
 interface HealthState {
   ok: boolean;
@@ -100,6 +100,12 @@ export function Navbar() {
               <span>Ollama Offline (127.0.0.1:11434)</span>
             </div>
           )}
+          <Link
+            href="/tiger-demo"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-800 focus-visible:outline-2 focus-visible:outline-indigo-600"
+          >
+            <Database className="h-3.5 w-3.5 text-indigo-600" /> Tiger Telemetry
+          </Link>
           <Link
             href="/settings"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-800 focus-visible:outline-2 focus-visible:outline-indigo-600"
