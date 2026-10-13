@@ -418,7 +418,7 @@ export function ScopeAuditReview({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                   {/* Left: Client Communication Excerpt */}
                   <div className="p-3 bg-amber-50/50 border border-amber-200/80 rounded-lg space-y-1">
-                    <span className="text-2xs font-bold text-amber-800 uppercase tracking-wider block flex items-center gap-1">
+                    <span className="text-2xs font-bold text-amber-800 uppercase tracking-wider flex items-center gap-1">
                       <Quote className="w-3 h-3" /> Cited Client Message Excerpt
                     </span>
                     <p className="font-mono text-slate-800 whitespace-pre-wrap leading-relaxed">
@@ -428,7 +428,7 @@ export function ScopeAuditReview({
 
                   {/* Right: Matched Contract Clause */}
                   <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
-                    <span className="text-2xs font-bold text-slate-600 uppercase tracking-wider block flex items-center gap-1">
+                    <span className="text-2xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1">
                       <Quote className="w-3 h-3" /> Baseline Agreement Reference
                     </span>
                     <p className="font-mono text-slate-700 whitespace-pre-wrap leading-relaxed">

@@ -203,7 +203,7 @@ export function AgreementManager({
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="Paste the exact text from your Statement of Work or agreement..."
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 font-mono text-xs leading-relaxed"
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 font-mono text-xs leading-relaxed"
             />
           </div>
 

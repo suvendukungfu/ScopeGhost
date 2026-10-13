@@ -1,3 +1,5 @@
+# ScopeGhost
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 ## This is NOT the Next.js you know
@@ -8,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-# ScopeGhost Engineering Rules
+## ScopeGhost Engineering Rules
 
 - Prefer small, reviewable changes over broad rewrites.
 - Read the relevant existing code before modifying it.
