@@ -217,6 +217,167 @@ function validateClauseCitation(
   };
 }
 
+/**
+ * Stop words and generic contract boilerplate ignored when checking substantive topic connection.
+ */
+const STOP_WORDS = new Set([
+  "a", "about", "above", "after", "again", "against", "all", "almost", "also",
+  "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because",
+  "been", "before", "being", "below", "between", "both", "but", "by", "can",
+  "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't",
+  "doing", "don't", "down", "during", "each", "few", "for", "from", "further",
+  "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "her",
+  "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in",
+  "into", "is", "isn't", "it", "its", "itself", "just", "me", "more", "most",
+  "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once", "only",
+  "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own",
+  "please", "same", "shan't", "she", "should", "shouldn't", "so", "some",
+  "such", "than", "that", "the", "their", "theirs", "them", "themselves",
+  "then", "there", "these", "they", "this", "those", "through", "to", "too",
+  "under", "until", "up", "very", "was", "wasn't", "we", "were", "weren't",
+  "what", "when", "where", "which", "while", "who", "whom", "why", "will",
+  "with", "won't", "would", "wouldn't", "you", "your", "yours", "yourself",
+  "yourselves",
+  // Common contract boilerplate and generic meta-terms
+  "clause", "clauses", "contract", "contracts", "agreement", "agreements",
+  "scope", "phase", "section", "sections", "shall", "must", "work", "item",
+  "items", "deliverable", "deliverables", "exclusion", "exclusions", "excluded",
+  "included", "including", "standard", "full", "strictly", "stated", "provided",
+  "requirement", "requirements", "support", "supported",
+  "multi", "single"
+]);
+
+function normalizeWord(word: string): string {
+  const w = word.toLowerCase().trim();
+  if (w.endsWith("ies") && w.length > 5) {
+    return w.slice(0, -3) + "y";
+  }
+  if (w.endsWith("s") && !w.endsWith("ss") && w.length > 3) {
+    return w.slice(0, -1);
+  }
+  return w;
+}
+
+/**
+ * Explicitly defined canonical aliases for domain terminology.
+ * Distinct currencies (EUR, GBP, USD) are kept strictly separate.
+ * Does not use broad prefix rules to avoid false positives (e.g. "apples" vs "app").
+ */
+const TERM_CANONICAL_MAP: Record<string, string> = {
+  application: "app",
+  applications: "app",
+  apps: "app",
+  app: "app",
+  revision: "revision",
+  revisions: "revision",
+  round: "round",
+  rounds: "round",
+  design: "design",
+  designs: "design",
+  // Distinct currency definitions:
+  euro: "eur",
+  euros: "eur",
+  eur: "eur",
+  gbp: "gbp",
+  pound: "gbp",
+  pounds: "gbp",
+  sterling: "gbp",
+  usd: "usd",
+  dollar: "usd",
+  dollars: "usd",
+  jpy: "jpy",
+  yen: "jpy",
+  multicurrency: "multicurrency",
+};
+
+/**
+ * Modifiers that may appear in multiple different contexts (e.g., mobile web vs. native mobile app,
+ * or generic currency vs. a specific currency like EUR) and therefore cannot alone prove that
+ * a specific exclusion applies.
+ */
+const AMBIGUOUS_MODIFIERS = new Set([
+  "mobile", "web", "online", "digital", "custom", "device", "layout",
+  "currency", "currencies",
+]);
+
+function extractSubstantiveTokens(text: string): string[] {
+  if (!text) return [];
+  const normalized = text.toLowerCase();
+  const words = normalized
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !STOP_WORDS.has(w));
+
+  // Also include hyphen-collapsed compound tokens (e.g., "multi-currency" -> "multicurrency")
+  const compoundMatches = normalized.match(/[a-z0-9]+-[a-z0-9]+/g);
+  if (compoundMatches) {
+    for (const compound of compoundMatches) {
+      const collapsed = compound.replace(/-/g, "");
+      if (collapsed.length >= 3 && !STOP_WORDS.has(collapsed)) {
+        words.push(collapsed);
+      }
+    }
+  }
+
+  return Array.from(new Set(words));
+}
+
+function wordsMatch(w1: string, w2: string): boolean {
+  if (w1 === w2) return true;
+  const n1 = normalizeWord(w1);
+  const n2 = normalizeWord(w2);
+  if (n1 === n2) return true;
+  const c1 = TERM_CANONICAL_MAP[n1] ?? n1;
+  const c2 = TERM_CANONICAL_MAP[n2] ?? n2;
+  return c1 === c2;
+}
+
+/**
+ * Evaluates whether the cited baseline clause shares substantive topical support
+ * with the client request.
+ *
+ * NOTE ON LIMITATIONS:
+ * Deterministic token overlap does NOT prove full semantic alignment or legal interpretation.
+ * Rather, this serves as a conservative negative filter: the complete absence of shared
+ * substantive domain terms between the cited clause and the client request proves that the
+ * exclusion cannot be contractually justified by this citation.
+ * When substantive support cannot be established from the structured data, the service
+ * conservatively downgrades the finding to AMBIGUOUS with LOW confidence and preserves
+ * explicit uncertainty.
+ */
+function hasContractualTopicSupport(
+  clause: ScopeAnalysisInput["scopeItems"][0],
+  clientRequest: ScopeAnalysisInput["clientRequest"],
+  citedRequestQuote?: string
+): boolean {
+  const clauseText = `${clause.title} ${clause.content}`;
+  const requestText = `${clientRequest.text} ${citedRequestQuote ?? ""}`;
+
+  const clauseTokens = extractSubstantiveTokens(clauseText);
+  const requestTokens = extractSubstantiveTokens(requestText);
+
+  if (clauseTokens.length === 0 || requestTokens.length === 0) {
+    return false;
+  }
+
+  // Find all substantive tokens that match between the clause and the request
+  const matchedTokens = clauseTokens.filter((cToken) =>
+    requestTokens.some((rToken) => wordsMatch(cToken, rToken))
+  );
+
+  if (matchedTokens.length === 0) {
+    return false;
+  }
+
+  // Do not accept an exclusion if the only matching token is an ambiguous modifier (e.g. "mobile")
+  // while the specific domain subjects (e.g. "app", "native", "ios", "android") do not match.
+  const hasSpecificSubjectMatch = matchedTokens.some(
+    (token) => !AMBIGUOUS_MODIFIERS.has(token.toLowerCase())
+  );
+
+  return hasSpecificSubjectMatch;
+}
+
 function errorCategory(error: unknown): ScopeAnalysisServiceError["category"] {
   if (error instanceof ScopeAnalysisServiceError) return error.category;
   if (error instanceof OllamaClientError) {
@@ -284,18 +445,49 @@ export class ScopeAnalysisService {
       const missingInformation = [...result.missingInformation];
 
       // If no verified exclusion clause supports an out-of-scope conclusion, return an uncertain finding
-      const isExclusionSupported =
+      const matchedScopeItem = parsedInput.data.scopeItems.find(
+        (item) => item.id === verifiedClauseCitation?.clauseId
+      );
+
+      const isClauseKindEligible =
         verifiedClauseCitation &&
         (verifiedClauseCitation.kind === "EXCLUSION" ||
           verifiedClauseCitation.kind === "REVISION_LIMIT");
 
+      const hasTopicSupport =
+        Boolean(matchedScopeItem) &&
+        hasContractualTopicSupport(
+          matchedScopeItem!,
+          parsedInput.data.clientRequest,
+          result.supportingEvidence[0]?.quote
+        );
+
+      const isExclusionSupported = isClauseKindEligible && hasTopicSupport;
+
       if (classification === "POTENTIALLY_OUT_OF_SCOPE" && !isExclusionSupported) {
         classification = "AMBIGUOUS";
         confidence = "LOW";
-        confidenceExplanation =
-          "Low confidence: No baseline exclusion clause was verified to support contractually excluding this request.";
-        explanation = `${result.explanation} (Note: No baseline contract clause explicitly excludes this request; classified as uncertain pending contractual clarification.)`;
-        missingInformation.push("Specific contract clause supporting scope exclusion");
+        if (!isClauseKindEligible) {
+          confidenceExplanation =
+            "Low confidence: No baseline exclusion clause was verified to support contractually excluding this request.";
+          explanation = `${result.explanation} (Note: No baseline contract clause explicitly excludes this request; classified as uncertain pending contractual clarification.)`;
+          if (!missingInformation.includes("Specific contract clause supporting scope exclusion")) {
+            missingInformation.push("Specific contract clause supporting scope exclusion");
+          }
+        } else {
+          confidenceExplanation =
+            "Low confidence: Cited exclusion clause lacks substantive topical support for the requested feature.";
+          explanation = `${result.explanation} (Note: Cited clause "${verifiedClauseCitation?.clauseId}" does not establish substantive topical support for the requested feature; classified as uncertain pending contractual clarification.)`;
+          if (
+            !missingInformation.includes(
+              "Specific contract clause supporting scope exclusion for the requested feature"
+            )
+          ) {
+            missingInformation.push(
+              "Specific contract clause supporting scope exclusion for the requested feature"
+            );
+          }
+        }
       }
 
       const analysis: ScopeAnalysisResult = {

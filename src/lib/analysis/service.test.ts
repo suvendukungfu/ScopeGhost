@@ -201,6 +201,16 @@ describe("Local scope analysis service", () => {
   it("allows POTENTIALLY_OUT_OF_SCOPE when citing a verified REVISION_LIMIT clause", async () => {
     const revisionInput: ScopeAnalysisInput = {
       ...input,
+      clientRequest: {
+        id: "request-rev-4",
+        text: "Please provide a fourth round of design revisions for the homepage.",
+      },
+      evidenceExcerpts: [
+        {
+          evidenceId: "DOC-1#C05",
+          text: "Please provide a fourth round of design revisions for the homepage.",
+        },
+      ],
       scopeItems: [
         ...input.scopeItems,
         {
@@ -217,6 +227,12 @@ describe("Local scope analysis service", () => {
         clauseId: "scope-rev-limit",
         quote: "Contract includes up to 2 revision rounds for design deliverables.",
       },
+      supportingEvidence: [
+        {
+          evidenceId: "DOC-1#C05",
+          quote: "Please provide a fourth round of design revisions for the homepage.",
+        },
+      ],
       explanation: "Client is requesting a 4th round of design revisions.",
     }));
     const service = new ScopeAnalysisService(revisionLimitModel.model, vi.fn());
@@ -228,6 +244,193 @@ describe("Local scope analysis service", () => {
       quote: "Contract includes up to 2 revision rounds for design deliverables.",
       isVerified: true,
     });
+  });
+
+  it("downgrades out-of-scope finding to uncertain when cited exclusion is topic-mismatched with request", async () => {
+    const mismatchedInput: ScopeAnalysisInput = {
+      ...input,
+      clientRequest: {
+        id: "request-currency",
+        text: "Please enable multi-currency checkout for EUR and GBP.",
+      },
+      evidenceExcerpts: [
+        {
+          evidenceId: "DOC-1#C04",
+          text: "Please enable multi-currency checkout for EUR and GBP.",
+        },
+      ],
+    };
+    const mismatchedModel = createModel(modelResponse({
+      classification: "POTENTIALLY_OUT_OF_SCOPE",
+      clauseCitation: {
+        clauseId: "scope-mobile",
+        quote: "Native iOS applications are excluded.",
+      },
+      supportingEvidence: [
+        {
+          evidenceId: "DOC-1#C04",
+          quote: "Please enable multi-currency checkout for EUR and GBP.",
+        },
+      ],
+      explanation: "Multi-currency checkout is not included in the scope.",
+    }));
+    const service = new ScopeAnalysisService(mismatchedModel.model, vi.fn());
+    const result = await service.analyze(mismatchedInput);
+
+    // An exclusion clause about native iOS apps cannot support excluding a multi-currency request.
+    // It must be downgraded to AMBIGUOUS with LOW confidence and preserve honest uncertainty.
+    expect(result.classification).toBe("AMBIGUOUS");
+    expect(result.confidence).toBe("LOW");
+    expect(result.missingInformation).toContain(
+      "Specific contract clause supporting scope exclusion for the requested feature"
+    );
+  });
+
+  it("downgrades out-of-scope finding when clause excludes native apps but request asks for responsive mobile web layout", async () => {
+    const mobileWebInput: ScopeAnalysisInput = {
+      ...input,
+      clientRequest: {
+        id: "request-mobile-web",
+        text: "Please ensure the storefront web checkout has a mobile-friendly responsive layout for smartphones.",
+      },
+      evidenceExcerpts: [
+        {
+          evidenceId: "DOC-1#C06",
+          text: "Please ensure the storefront web checkout has a mobile-friendly responsive layout for smartphones.",
+        },
+      ],
+      scopeItems: [
+        ...input.scopeItems,
+        {
+          id: "scope-native-apps",
+          kind: "EXCLUSION",
+          title: "Native mobile apps excluded",
+          content: "Native mobile applications (iOS and Android) are strictly excluded from Phase 1 scope.",
+        },
+      ],
+    };
+    const mobileWebModel = createModel(modelResponse({
+      classification: "POTENTIALLY_OUT_OF_SCOPE",
+      clauseCitation: {
+        clauseId: "scope-native-apps",
+        quote: "Native mobile applications (iOS and Android) are strictly excluded from Phase 1 scope.",
+      },
+      supportingEvidence: [
+        {
+          evidenceId: "DOC-1#C06",
+          quote: "Please ensure the storefront web checkout has a mobile-friendly responsive layout for smartphones.",
+        },
+      ],
+      explanation: "Mobile features are excluded from Phase 1.",
+    }));
+    const service = new ScopeAnalysisService(mobileWebModel.model, vi.fn());
+    const result = await service.analyze(mobileWebInput);
+
+    // The word 'mobile' appears in both, but the exclusion covers native mobile applications,
+    // not a responsive mobile web layout. Must fail closed: AMBIGUOUS with LOW confidence.
+    expect(result.classification).toBe("AMBIGUOUS");
+    expect(result.confidence).toBe("LOW");
+    expect(result.clauseCitation?.isVerified).toBe(true);
+    expect(result.clauseCitation?.clauseId).toBe("scope-native-apps");
+    expect(result.missingInformation).toContain(
+      "Specific contract clause supporting scope exclusion for the requested feature"
+    );
+  });
+
+  it("downgrades out-of-scope finding when clause excludes GBP but request asks for EUR support", async () => {
+    const eurRequestInput: ScopeAnalysisInput = {
+      ...input,
+      clientRequest: {
+        id: "request-eur",
+        text: "Please add checkout support for payments in Euro (EUR).",
+      },
+      evidenceExcerpts: [
+        {
+          evidenceId: "DOC-1#C07",
+          text: "Please add checkout support for payments in Euro (EUR).",
+        },
+      ],
+      scopeItems: [
+        ...input.scopeItems,
+        {
+          id: "scope-gbp-exclusion",
+          kind: "EXCLUSION",
+          title: "British Pounds excluded",
+          content: "Transactions and billing in British Pounds (GBP / sterling) are strictly excluded from Phase 1 scope.",
+        },
+      ],
+    };
+    const gbpExclusionModel = createModel(modelResponse({
+      classification: "POTENTIALLY_OUT_OF_SCOPE",
+      clauseCitation: {
+        clauseId: "scope-gbp-exclusion",
+        quote: "Transactions and billing in British Pounds (GBP / sterling) are strictly excluded from Phase 1 scope.",
+      },
+      supportingEvidence: [
+        {
+          evidenceId: "DOC-1#C07",
+          quote: "Please add checkout support for payments in Euro (EUR).",
+        },
+      ],
+      explanation: "International currency payments are excluded.",
+    }));
+    const service = new ScopeAnalysisService(gbpExclusionModel.model, vi.fn());
+    const result = await service.analyze(eurRequestInput);
+
+    // A clause specifically excluding GBP cannot justify excluding EUR support.
+    // Distinct currencies must be kept separate; fails closed to AMBIGUOUS with LOW confidence.
+    expect(result.classification).toBe("AMBIGUOUS");
+    expect(result.confidence).toBe("LOW");
+    expect(result.clauseCitation?.isVerified).toBe(true);
+    expect(result.clauseCitation?.clauseId).toBe("scope-gbp-exclusion");
+    expect(result.missingInformation).toContain(
+      "Specific contract clause supporting scope exclusion for the requested feature"
+    );
+  });
+
+  it("allows POTENTIALLY_OUT_OF_SCOPE when cited clause specifically excludes EUR", async () => {
+    const eurExclusionInput: ScopeAnalysisInput = {
+      ...input,
+      clientRequest: {
+        id: "request-eur-positive",
+        text: "Please add checkout support for payments in Euro (EUR).",
+      },
+      evidenceExcerpts: [
+        {
+          evidenceId: "DOC-1#C08",
+          text: "Please add checkout support for payments in Euro (EUR).",
+        },
+      ],
+      scopeItems: [
+        ...input.scopeItems,
+        {
+          id: "scope-eur-exclusion",
+          kind: "EXCLUSION",
+          title: "Euro currency excluded",
+          content: "Transactions and billing in Euro (EUR) are strictly excluded from Phase 1 scope.",
+        },
+      ],
+    };
+    const eurExclusionModel = createModel(modelResponse({
+      classification: "POTENTIALLY_OUT_OF_SCOPE",
+      clauseCitation: {
+        clauseId: "scope-eur-exclusion",
+        quote: "Transactions and billing in Euro (EUR) are strictly excluded from Phase 1 scope.",
+      },
+      supportingEvidence: [
+        {
+          evidenceId: "DOC-1#C08",
+          quote: "Please add checkout support for payments in Euro (EUR).",
+        },
+      ],
+      explanation: "Euro payments are explicitly excluded by contract.",
+    }));
+    const service = new ScopeAnalysisService(eurExclusionModel.model, vi.fn());
+    const result = await service.analyze(eurExclusionInput);
+
+    expect(result.classification).toBe("POTENTIALLY_OUT_OF_SCOPE");
+    expect(result.clauseCitation?.isVerified).toBe(true);
+    expect(result.clauseCitation?.clauseId).toBe("scope-eur-exclusion");
   });
 
   it("retains both supporting and contradicting citations when scope clauses conflict", async () => {
