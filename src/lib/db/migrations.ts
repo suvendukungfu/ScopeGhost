@@ -166,4 +166,29 @@ export function runMigrations(db: DatabaseSync): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_source_stable_id
       ON evidence_sources(project_id, stable_id);
   `);
+
+  const auditEventsMaster = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'audit_events'"
+  ).get() as { sql?: string } | undefined;
+
+  if (auditEventsMaster?.sql && !auditEventsMaster.sql.includes("CHANGE_ORDER_UPDATED")) {
+    db.exec(`
+      CREATE TABLE audit_events_new (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        event_type TEXT NOT NULL CHECK(event_type IN (
+          'SOURCE_IMPORTED', 'ANALYSIS_COMPLETED', 'FINDING_REVIEWED',
+          'CHANGE_ORDER_DRAFTED', 'CHANGE_ORDER_UPDATED'
+        )),
+        entity_id TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+      INSERT INTO audit_events_new SELECT id, project_id, event_type, entity_id, metadata_json, created_at FROM audit_events;
+      DROP TABLE audit_events;
+      ALTER TABLE audit_events_new RENAME TO audit_events;
+      CREATE INDEX IF NOT EXISTS idx_audit_events_project ON audit_events(project_id, created_at);
+    `);
+  }
 }

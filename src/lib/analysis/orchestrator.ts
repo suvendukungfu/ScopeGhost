@@ -118,7 +118,9 @@ export class ScopeAnalysisOrchestrator {
         } catch (err: unknown) {
           if (
             err instanceof ScopeAnalysisServiceError &&
-            (err.category === "UNVERIFIED_CITATION" || err.category === "UNKNOWN_EVIDENCE")
+            (err.category === "UNVERIFIED_CITATION" ||
+              err.category === "UNKNOWN_EVIDENCE" ||
+              err.category === "MALFORMED_OUTPUT")
           ) {
             findingInputs.push({
               runId: run.id,
@@ -126,7 +128,7 @@ export class ScopeAnalysisOrchestrator {
               evidenceChunkId: chunk.id,
               classification: "INSUFFICIENT_EVIDENCE",
               title: chunk.textContent.trim().slice(0, 147) || "Client request",
-              reasoning: `Model analysis produced an unverified citation or unsupported evidence reference: ${err.message}. Flagged for human review without accepting unverified claims.`,
+              reasoning: `Model analysis produced an unverified citation or malformed output: ${err.message}. Flagged for human review without accepting unverified claims.`,
               citedRequestQuote: chunk.textContent.slice(0, 300),
               isRequestQuoteVerified: false,
               isClauseQuoteVerified: false,
@@ -135,9 +137,9 @@ export class ScopeAnalysisOrchestrator {
               estHoursMax: 0,
               supportingEvidenceIds: [],
               contradictingEvidenceIds: [],
-              missingInformation: ["Verifiable citation in supplied evidence excerpt"],
+              missingInformation: ["Verifiable structured evaluation from model"],
               confidenceIndicator: "LOW",
-              confidenceExplanation: "Model output failed evidence verification.",
+              confidenceExplanation: "Model output could not be verified or structured.",
               nextAction: "Review raw client message manually to verify scope.",
               estimateSource: "MODEL",
             });

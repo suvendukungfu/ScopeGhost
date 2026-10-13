@@ -82,15 +82,21 @@ export const ModelEvidenceCitationSchema = z.object({
 });
 
 export const ScopeAnalysisResultSchema = z.object({
-  classification: ScopeClassificationSchema,
+  classification: z.preprocess(
+    (val) => typeof val === "string" ? val.trim().toUpperCase().replace(/[-\s]+/g, "_") : val,
+    ScopeClassificationSchema
+  ),
   explanation: z.string().min(1).max(2000),
-  supportingEvidence: z.array(ModelEvidenceCitationSchema).max(20),
-  contradictingEvidence: z.array(ModelEvidenceCitationSchema).max(20),
-  missingInformation: z.array(z.string().min(1).max(500)).max(20),
-  confidence: ModelConfidenceSchema,
+  supportingEvidence: z.array(ModelEvidenceCitationSchema).max(20).default([]),
+  contradictingEvidence: z.array(ModelEvidenceCitationSchema).max(20).default([]),
+  missingInformation: z.array(z.string().min(1).max(500)).max(20).default([]),
+  confidence: z.preprocess(
+    (val) => typeof val === "string" ? val.trim().toUpperCase() : val,
+    ModelConfidenceSchema
+  ),
   confidenceExplanation: z.string().min(1).max(500),
-  estimatedHoursMin: z.number().finite().nonnegative().max(100_000),
-  estimatedHoursMax: z.number().finite().nonnegative().max(100_000),
+  estimatedHoursMin: z.coerce.number().finite().nonnegative().max(100_000).default(0),
+  estimatedHoursMax: z.coerce.number().finite().nonnegative().max(100_000).default(0),
   nextAction: z.string().min(1).max(1000),
 }).strict().refine(
   (result) => result.estimatedHoursMax >= result.estimatedHoursMin,
