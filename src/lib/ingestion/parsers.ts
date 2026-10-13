@@ -15,10 +15,15 @@ export interface ParsedItem {
  */
 export function parseCsvRows(csvContent: string): string[][] {
   const normalized = normalizeTextContent(csvContent);
+  if (!normalized.trim()) {
+    throw new Error("CSV file is empty");
+  }
+
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = "";
   let inQuotes = false;
+  let afterClosingQuote = false;
 
   // Auto-detect delimiter from the first line (comma or semicolon or tab)
   const firstLine = normalized.split("\n")[0] || "";
@@ -47,6 +52,7 @@ export function parseCsvRows(csvContent: string): string[][] {
         } else {
           // End of quoted field
           inQuotes = false;
+          afterClosingQuote = true;
           i++;
           continue;
         }
@@ -56,7 +62,30 @@ export function parseCsvRows(csvContent: string): string[][] {
         continue;
       }
     } else {
-      if (char === '"') {
+      if (afterClosingQuote) {
+        if (char === delimiter) {
+          currentRow.push(sanitizeCsvCell(currentField));
+          currentField = "";
+          afterClosingQuote = false;
+          i++;
+          continue;
+        }
+        if (char === "\n") {
+          currentRow.push(sanitizeCsvCell(currentField));
+          currentField = "";
+          if (currentRow.some((field) => field.trim().length > 0)) {
+            rows.push(currentRow);
+          }
+          currentRow = [];
+          afterClosingQuote = false;
+          i++;
+          continue;
+        }
+        throw new Error(`Malformed CSV: unexpected character after closing quote at position ${i}`);
+      } else if (char === '"') {
+        if (currentField.length > 0) {
+          throw new Error(`Malformed CSV: quote inside an unquoted field at position ${i}`);
+        }
         inQuotes = true;
         i++;
         continue;
@@ -82,8 +111,12 @@ export function parseCsvRows(csvContent: string): string[][] {
     }
   }
 
+  if (inQuotes) {
+    throw new Error("Malformed CSV: unterminated quoted field");
+  }
+
   // Push last field if present
-  if (currentField.length > 0 || currentRow.length > 0) {
+  if (currentField.length > 0 || currentRow.length > 0 || afterClosingQuote) {
     currentRow.push(sanitizeCsvCell(currentField));
     if (currentRow.some((f) => f.trim().length > 0)) {
       rows.push(currentRow);
@@ -101,7 +134,13 @@ export function parseCsvContent(csvContent: string): ParsedItem[] {
   if (rows.length === 0) return [];
 
   // Normalize header names
-  const headers = rows[0].map((h) => h.toLowerCase().trim().replace(/['"]/g, ""));
+  const headerCounts = new Map<string, number>();
+  const headers = rows[0].map((header, index) => {
+    const normalized = header.toLowerCase().trim().replace(/['"]/g, "") || `column_${index + 1}`;
+    const count = (headerCounts.get(normalized) ?? 0) + 1;
+    headerCounts.set(normalized, count);
+    return count === 1 ? normalized : `${normalized}_${count}`;
+  });
   const dataRows = rows.slice(1);
 
   // Identify column indices
@@ -131,10 +170,8 @@ export function parseCsvContent(csvContent: string): ParsedItem[] {
     }
 
     const metadata: Record<string, string> = {};
-    headers.forEach((hdr, idx) => {
-      if (row[idx]) {
-        metadata[hdr] = row[idx];
-      }
+    row.forEach((value, idx) => {
+      metadata[headers[idx] ?? `column_${idx + 1}`] = value;
     });
 
     return {

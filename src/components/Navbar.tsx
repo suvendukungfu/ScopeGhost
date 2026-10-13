@@ -2,12 +2,13 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { ShieldCheck, Cpu, AlertTriangle } from "lucide-react";
+import { ShieldCheck, Cpu, AlertTriangle, Settings2 } from "lucide-react";
 
 interface HealthState {
   ok: boolean;
   selectedModelAvailable: boolean;
   configuredModel?: string;
+  status?: "AVAILABLE" | "MODEL_UNAVAILABLE" | "OFFLINE";
   loading: boolean;
   error?: string;
 }
@@ -26,6 +27,7 @@ export function Navbar() {
       setHealth({
         ok: data.ok,
         selectedModelAvailable: data.selectedModelAvailable,
+        status: data.status,
         configuredModel: data.configuredModel,
         loading: false,
         error: data.error,
@@ -51,16 +53,16 @@ export function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center text-white font-bold text-xl shadow-sm group-hover:bg-emerald-700 transition">
+            <div className="w-9 h-9 rounded-lg bg-indigo-700 flex items-center justify-center text-white font-bold text-xl shadow-sm group-hover:bg-indigo-800 transition">
               SG
             </div>
             <span className="font-bold text-xl text-slate-900 tracking-tight">
-              Scope<span className="text-emerald-600">Ghost</span>
+              Scope<span className="text-indigo-700">Ghost</span>
             </span>
           </Link>
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Local-First &bull; Private</span>
+            <span>Local-only &bull; Private</span>
           </div>
         </div>
 
@@ -72,12 +74,13 @@ export function Navbar() {
             </div>
           ) : health.ok && health.selectedModelAvailable ? (
             <div
-              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md"
+              role="status"
+              className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-md"
               title={`Connected to Ollama using ${health.configuredModel}`}
             >
-              <Cpu className="w-3.5 h-3.5 text-emerald-600" />
+              <Cpu className="w-3.5 h-3.5 text-indigo-600" />
               <span>Ollama: {health.configuredModel}</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
             </div>
           ) : health.ok && !health.selectedModelAvailable ? (
             <div
@@ -85,10 +88,11 @@ export function Navbar() {
               title={`Model ${health.configuredModel} not found in Ollama`}
             >
               <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
-              <span>Run: ollama pull {health.configuredModel || "gemma3:4b"}</span>
+              <span>Install: {health.configuredModel || "gemma3:4b"}</span>
             </div>
           ) : (
             <div
+              role="status"
               className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-rose-800 bg-rose-50 border border-rose-200 rounded-md"
               title="Ollama is not running. Start it with 'ollama serve'"
             >
@@ -96,6 +100,12 @@ export function Navbar() {
               <span>Ollama Offline (127.0.0.1:11434)</span>
             </div>
           )}
+          <Link
+            href="/settings"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-indigo-300 hover:text-indigo-800 focus-visible:outline-2 focus-visible:outline-indigo-600"
+          >
+            <Settings2 className="h-3.5 w-3.5" /> Settings
+          </Link>
         </div>
       </div>
     </header>

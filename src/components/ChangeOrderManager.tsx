@@ -22,6 +22,7 @@ interface Props {
   findings: ScopeFinding[];
   changeOrders: ChangeOrder[];
   onChangeOrderCreated: (newOrder: ChangeOrder) => void;
+  onChangeOrderUpdated: (updatedOrder: ChangeOrder) => void;
 }
 
 export function ChangeOrderManager({
@@ -29,18 +30,14 @@ export function ChangeOrderManager({
   findings,
   changeOrders,
   onChangeOrderCreated,
+  onChangeOrderUpdated,
 }: Props) {
   const [isBuilderOpen, setIsBuilderOpen] = useState(false);
   const [title, setTitle] = useState("Additional Scope & Feature Adjustments");
   const [customNotes, setCustomNotes] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>(
     findings
-      .filter(
-        (f) =>
-          f.humanStatus === "ACCEPTED" ||
-          f.classification === "POTENTIALLY_OUT_OF_SCOPE" ||
-          f.classification === "AMBIGUOUS"
-      )
+      .filter((f) => f.humanStatus === "ACCEPTED")
       .map((f) => f.id)
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -48,6 +45,9 @@ export function ChangeOrderManager({
   const [activeOrder, setActiveOrder] = useState<ChangeOrder | null>(
     changeOrders[0] || null
   );
+  const [draftMarkdown, setDraftMarkdown] = useState(changeOrders[0]?.generatedMarkdown || "");
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   const toggleSelect = (id: string) => {
     if (selectedIds.includes(id)) {
@@ -88,6 +88,7 @@ export function ChangeOrderManager({
 
       onChangeOrderCreated(data.changeOrder);
       setActiveOrder(data.changeOrder);
+      setDraftMarkdown(data.changeOrder.generatedMarkdown);
       setIsBuilderOpen(false);
     } catch (err) {
       console.error(err);
@@ -97,10 +98,44 @@ export function ChangeOrderManager({
     }
   };
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2500);
+  const updateActiveOrder = async (status?: "DRAFT" | "APPROVED") => {
+    if (!activeOrder) return;
+    setOrderError(null);
+    setIsSavingOrder(true);
+    try {
+      const response = await fetch(
+        `/api/projects/${project.id}/change-orders/${activeOrder.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            generatedMarkdown: draftMarkdown,
+            ...(status ? { status } : {}),
+          }),
+        }
+      );
+      const data = await response.json();
+      if (!response.ok || !data.changeOrder) {
+        throw new Error(data.error || "Could not save the change order");
+      }
+      setActiveOrder(data.changeOrder);
+      setDraftMarkdown(data.changeOrder.generatedMarkdown);
+      onChangeOrderUpdated(data.changeOrder);
+    } catch (err: unknown) {
+      setOrderError(err instanceof Error ? err.message : "Could not save the change order");
+    } finally {
+      setIsSavingOrder(false);
+    }
+  };
+
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2500);
+    } catch {
+      setOrderError("Clipboard access is unavailable. Select and copy the draft text manually.");
+    }
   };
 
   return (
@@ -188,6 +223,7 @@ export function ChangeOrderManager({
                           type="checkbox"
                           checked={selectedIds.includes(f.id)}
                           onChange={() => toggleSelect(f.id)}
+                          disabled={f.humanStatus !== "ACCEPTED"}
                           className="mt-1 rounded text-emerald-600 focus:ring-emerald-500"
                         />
                         <div className="flex-1 space-y-0.5">
@@ -204,6 +240,9 @@ export function ChangeOrderManager({
                           <p className="text-2xs text-slate-500 truncate">
                             &quot;{f.citedRequestQuote}&quot;
                           </p>
+                          {f.humanStatus !== "ACCEPTED" && (
+                            <p className="text-2xs font-medium text-amber-800">Accept this finding in review before including it.</p>
+                          )}
                         </div>
                       </label>
                     ))}
@@ -280,7 +319,11 @@ export function ChangeOrderManager({
               {changeOrders.map((order) => (
                 <button
                   key={order.id}
-                  onClick={() => setActiveOrder(order)}
+                  onClick={() => {
+                    setActiveOrder(order);
+                    setDraftMarkdown(order.generatedMarkdown);
+                    setOrderError(null);
+                  }}
                   className={`w-full text-left p-4 rounded-xl border transition flex flex-col justify-between ${
                     activeOrder?.id === order.id
                       ? "bg-white border-emerald-600 shadow-sm ring-1 ring-emerald-500/30"
@@ -292,7 +335,11 @@ export function ChangeOrderManager({
                       <span className="text-2xs font-bold font-mono px-2 py-0.5 rounded-md bg-slate-100 text-slate-800">
                         CO #{order.orderNumber}
                       </span>
-                      <span className="text-2xs font-semibold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800">
+                      <span className={`text-2xs font-semibold px-2 py-0.5 rounded-md ${
+                        order.status === "APPROVED"
+                          ? "bg-indigo-100 text-indigo-800"
+                          : "bg-amber-100 text-amber-800"
+                      }`}>
                         {order.status}
                       </span>
                     </div>
@@ -318,6 +365,7 @@ export function ChangeOrderManager({
           <div className="lg:col-span-2">
             {activeOrder && (
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                {orderError && <p role="alert" className="border-b border-rose-200 bg-rose-50 px-5 py-3 text-sm text-rose-800">{orderError}</p>}
                 {/* Actions Bar */}
                 <div className="px-6 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -333,7 +381,7 @@ export function ChangeOrderManager({
                     <button
                       onClick={() =>
                         copyToClipboard(
-                          activeOrder.generatedMarkdown,
+                          draftMarkdown,
                           activeOrder.id
                         )
                       }
@@ -359,12 +407,47 @@ export function ChangeOrderManager({
                       <Printer className="w-3.5 h-3.5" />
                       <span>Print</span>
                     </button>
+                    {activeOrder.status === "DRAFT" && (
+                      <button
+                        type="button"
+                        onClick={() => updateActiveOrder("APPROVED")}
+                        disabled={isSavingOrder}
+                        className="rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-800 disabled:opacity-60"
+                      >
+                        {isSavingOrder ? "Saving…" : "Mark approved"}
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                {/* Document Preview */}
-                <div className="p-8 prose prose-slate max-w-none text-xs leading-relaxed font-mono whitespace-pre-wrap bg-slate-50/30">
-                  {activeOrder.generatedMarkdown}
+                <label className="sr-only" htmlFor={`change-order-${activeOrder.id}`}>
+                  Editable change order draft
+                </label>
+                <textarea
+                  id={`change-order-${activeOrder.id}`}
+                  aria-describedby={`change-order-status-${activeOrder.id}`}
+                  value={draftMarkdown}
+                  readOnly={activeOrder.status === "APPROVED"}
+                  onChange={(event) => setDraftMarkdown(event.target.value)}
+                  rows={26}
+                  className="w-full resize-y border-0 bg-white p-6 font-mono text-xs leading-relaxed text-slate-800 focus-visible:outline-2 focus-visible:outline-indigo-600 disabled:opacity-70"
+                />
+                <div id={`change-order-status-${activeOrder.id}`} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3 text-xs">
+                  <p className="text-slate-600">
+                    {activeOrder.status === "APPROVED"
+                      ? "Approved locally for human/client review. Nothing is sent automatically."
+                      : "Draft only. Edit the language above, save it, then explicitly mark it approved."}
+                  </p>
+                  {activeOrder.status === "DRAFT" && (
+                    <button
+                      type="button"
+                      onClick={() => updateActiveOrder("DRAFT")}
+                      disabled={isSavingOrder || draftMarkdown === activeOrder.generatedMarkdown}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 disabled:opacity-50"
+                    >
+                      {isSavingOrder ? "Saving…" : "Save draft"}
+                    </button>
+                  )}
                 </div>
               </div>
             )}

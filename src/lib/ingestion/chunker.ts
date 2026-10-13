@@ -8,6 +8,7 @@ export interface EvidenceChunkData {
   author?: string | null;
   timestampStr?: string | null;
   sourceHash: string;
+  metadata: Record<string, string>;
 }
 
 /**
@@ -46,6 +47,7 @@ export function chunkParsedItems(
         author: item.author ?? null,
         timestampStr: item.timestampStr ?? null,
         sourceHash,
+        metadata: item.metadata ?? {},
       });
       chunkIndex++;
     } else {
@@ -65,6 +67,7 @@ export function chunkParsedItems(
           author: item.author ?? null,
           timestampStr: item.timestampStr ?? null,
           sourceHash,
+          metadata: item.metadata ?? {},
         });
 
         chunkIndex++;

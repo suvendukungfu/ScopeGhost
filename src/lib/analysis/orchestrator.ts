@@ -2,11 +2,10 @@ import { DatabaseSync } from "node:sqlite";
 import { BaselineClauseRepository } from "@/lib/db/repositories/clauses";
 import { EvidenceRepository } from "@/lib/db/repositories/evidence";
 import { FindingsRepository, CreateScopeFindingInput } from "@/lib/db/repositories/findings";
-import { OllamaClient } from "@/lib/ollama/client";
-import { buildScopeAnalysisPrompt, SCOPE_ANALYSIS_SYSTEM_PROMPT } from "./prompts";
-import { extractAndValidateLlmOutput } from "./parser";
-import { verifyCitation } from "@/lib/verification/citation";
+import { ProjectRepository } from "@/lib/db/repositories/projects";
+import { AuditEventRepository } from "@/lib/db/repositories/audit-events";
 import { ScopeFinding } from "@/lib/types";
+import { ScopeAnalysisService, ScopeAnalysisServiceError } from "./service";
 
 export interface AnalysisOrchestratorResult {
   runId: string;
@@ -17,111 +16,150 @@ export interface AnalysisOrchestratorResult {
 export class ScopeAnalysisOrchestrator {
   constructor(
     private db: DatabaseSync,
-    private ollamaClient = new OllamaClient()
+    private analysisService = new ScopeAnalysisService()
   ) {}
 
-  async runAnalysis(projectId: string): Promise<AnalysisOrchestratorResult> {
+  async runAnalysis(
+    projectId: string,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<AnalysisOrchestratorResult> {
     const startTime = Date.now();
+    const projectRepo = new ProjectRepository(this.db);
     const clauseRepo = new BaselineClauseRepository(this.db);
     const evidenceRepo = new EvidenceRepository(this.db);
     const findingsRepo = new FindingsRepository(this.db);
+    const auditRepo = new AuditEventRepository(this.db);
+
+    const project = projectRepo.findById(projectId);
+    if (!project) {
+      throw new Error("Project not found");
+    }
 
     const clauses = clauseRepo.findByProjectId(projectId);
     const chunks = evidenceRepo.findChunksByProjectId(projectId);
-
     if (chunks.length === 0) {
       throw new Error(
-        "No evidence chunks found for this project. Please import client messages or emails before running an audit."
+        "No evidence excerpts found for this project. Import client messages before running an audit."
       );
     }
 
-    // 1. Create Analysis Run record
     const run = findingsRepo.createRun({
       projectId,
-      modelName: this.ollamaClient.getModel(),
+      modelName: this.analysisService.getModelName(),
     });
 
     try {
-      // 2. Build prompt with structural boundaries and anti-injection instructions
-      const prompt = buildScopeAnalysisPrompt(clauses, chunks);
-
-      // 3. Query local Ollama instance
-      const rawResponse = await this.ollamaClient.generateCompletion(
-        prompt,
-        SCOPE_ANALYSIS_SYSTEM_PROMPT
-      );
-
-      // 4. Extract and validate structured JSON
-      const parsedOutput = extractAndValidateLlmOutput(rawResponse);
-
-      // 5. Run programmatic Citation Verification Engine on every finding
-      const chunkMap = new Map(chunks.map((c) => [c.stableId, c]));
-      const clauseMap = new Map(
-        clauses.map((cl) => [(cl.sectionRef || cl.title).toLowerCase(), cl])
-      );
+      const originalScope = clauses
+        .filter((clause) => clause.clauseType === "DELIVERABLE")
+        .map((clause) => `${clause.title}: ${clause.content}`)
+        .join("\n");
+      const scopeItems = clauses.map((clause) => ({
+        id: clause.id,
+        kind: clause.clauseType,
+        title: clause.title,
+        content: clause.content,
+      }));
 
       const findingInputs: CreateScopeFindingInput[] = [];
+      for (const chunk of chunks) {
+        if (options.signal?.aborted) {
+          throw new Error("Analysis request was cancelled");
+        }
 
-      for (const item of parsedOutput.findings) {
-        // Resolve referenced chunk
-        const chunk = chunkMap.get(item.chunkStableId) || chunks[0];
+        try {
+          const result = await this.analysisService.analyze(
+            {
+              originalScope,
+              scopeItems,
+              clientRequest: {
+                id: chunk.stableId,
+                text: chunk.textContent,
+              },
+              evidenceExcerpts: [{
+                evidenceId: chunk.stableId,
+                text: chunk.textContent,
+              }],
+            },
+            options
+          );
 
-        // Verify request citation against raw chunk text
-        const reqVerification = verifyCitation(item.requestQuote, chunk.textContent);
+          const confidenceScore =
+            result.confidence === "HIGH" ? 0.9 : result.confidence === "MEDIUM" ? 0.65 : 0.35;
+          const hours =
+            result.classification === "POTENTIALLY_OUT_OF_SCOPE" ||
+            result.classification === "AMBIGUOUS"
+              ? result.estimate
+              : null;
+          const candidateCitation =
+            result.supportingEvidence[0] ??
+            result.contradictingEvidence[0];
 
-        // Find matched clause and verify clause quote if present
-        let matchedClauseId: string | null = null;
-        let isClauseVerified = false;
-
-        if (item.matchedClauseSection) {
-          const searchKey = item.matchedClauseSection.toLowerCase();
-          for (const [key, cl] of clauseMap.entries()) {
-            if (key.includes(searchKey) || searchKey.includes(key)) {
-              matchedClauseId = cl.id;
-              if (item.clauseQuote) {
-                const clauseVer = verifyCitation(item.clauseQuote, cl.content);
-                isClauseVerified = clauseVer.isVerified;
-              }
-              break;
-            }
+          findingInputs.push({
+            runId: run.id,
+            projectId,
+            evidenceChunkId: chunk.id,
+            classification: result.classification,
+            title: chunk.textContent.trim().slice(0, 147) || "Client request",
+            reasoning: result.explanation,
+            citedRequestQuote: candidateCitation?.quote ?? chunk.textContent,
+            isRequestQuoteVerified: Boolean(candidateCitation),
+            isClauseQuoteVerified: false,
+            confidenceScore,
+            estHoursMin: hours?.hoursMin ?? 0,
+            estHoursMax: hours?.hoursMax ?? 0,
+            supportingEvidenceIds: result.supportingEvidenceIds,
+            contradictingEvidenceIds: result.contradictingEvidenceIds,
+            missingInformation: result.missingInformation,
+            confidenceIndicator: result.confidence,
+            confidenceExplanation: result.confidenceExplanation,
+            nextAction: result.nextAction,
+            estimateSource: "MODEL",
+          });
+        } catch (err: unknown) {
+          if (
+            err instanceof ScopeAnalysisServiceError &&
+            (err.category === "UNVERIFIED_CITATION" || err.category === "UNKNOWN_EVIDENCE")
+          ) {
+            findingInputs.push({
+              runId: run.id,
+              projectId,
+              evidenceChunkId: chunk.id,
+              classification: "INSUFFICIENT_EVIDENCE",
+              title: chunk.textContent.trim().slice(0, 147) || "Client request",
+              reasoning: `Model analysis produced an unverified citation or unsupported evidence reference: ${err.message}. Flagged for human review without accepting unverified claims.`,
+              citedRequestQuote: chunk.textContent.slice(0, 300),
+              isRequestQuoteVerified: false,
+              isClauseQuoteVerified: false,
+              confidenceScore: 0.2,
+              estHoursMin: 0,
+              estHoursMax: 0,
+              supportingEvidenceIds: [],
+              contradictingEvidenceIds: [],
+              missingInformation: ["Verifiable citation in supplied evidence excerpt"],
+              confidenceIndicator: "LOW",
+              confidenceExplanation: "Model output failed evidence verification.",
+              nextAction: "Review raw client message manually to verify scope.",
+              estimateSource: "MODEL",
+            });
+            continue;
           }
+          throw err;
         }
-
-        // If request quote is unverified, downgrade classification if it claimed to be out-of-scope without evidence
-        let finalClassification = item.classification;
-        if (!reqVerification.isVerified) {
-          finalClassification = "INSUFFICIENT_EVIDENCE";
-        }
-
-        findingInputs.push({
-          runId: run.id,
-          projectId,
-          evidenceChunkId: chunk.id,
-          matchedClauseId,
-          classification: finalClassification,
-          title: item.title,
-          reasoning: item.reasoning,
-          citedRequestQuote: item.requestQuote,
-          citedClauseQuote: item.clauseQuote ?? null,
-          isRequestQuoteVerified: reqVerification.isVerified,
-          isClauseQuoteVerified: isClauseVerified,
-          confidenceScore: reqVerification.isVerified
-            ? item.confidenceScore
-            : Math.min(item.confidenceScore, 0.4),
-          estHoursMin: item.estHoursMin,
-          estHoursMax: item.estHoursMax,
-        });
       }
 
-      // 6. Persist findings to database
       const createdFindings = findingsRepo.createFindings(findingInputs);
       findingsRepo.updateRunStatus(run.id, "COMPLETED");
+      auditRepo.create({
+        projectId,
+        eventType: "ANALYSIS_COMPLETED",
+        entityId: run.id,
+        metadata: { findingCount: createdFindings.length, model: run.modelName },
+      });
 
-      const durationMs = Date.now() - startTime;
       return {
         runId: run.id,
         findings: createdFindings,
-        durationMs,
+        durationMs: Date.now() - startTime,
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

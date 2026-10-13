@@ -23,6 +23,7 @@ describe("Reproducible Scope Evaluation Benchmark", () => {
     chunkIndex: idx,
     stableId: tc.chunkId,
     textContent: tc.requestText,
+    metadata: {},
   }));
 
   it("constructs isolated prompts that defend against indirect prompt injection", () => {

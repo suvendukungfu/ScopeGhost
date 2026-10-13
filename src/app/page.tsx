@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default function HomePage() {
   const db = getDb();
   const repo = new ProjectRepository(db);
-  const projects = repo.findAll();
+  const projects = repo.findAllWithSummary();
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">

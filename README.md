@@ -23,7 +23,7 @@ ScopeGhost audits client communication threads against signed project agreements
 
 ## System Architecture
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────┐
 │                        LOCAL PRIVACY BOUNDARY                          │
 │                                                                        │
@@ -44,10 +44,11 @@ ScopeGhost audits client communication threads against signed project agreements
 ```
 
 ### Technology Stack
+
 - **Framework:** Next.js 15+ (App Router), React 19, TypeScript (Strict)
 - **Styling:** Tailwind CSS (Accessible light theme with slate/emerald tokens)
 - **Database:** Local SQLite via native `node:sqlite` (zero external C++ dependencies)
-- **LLM Inference:** Local Ollama API with configurable Gemma model (`gemma3:4b`)
+- **LLM Inference:** Local Ollama API with a validated configurable model (`gemma3:4b` by default)
 - **Validation:** Zod 3.x for schema enforcement on API inputs and model outputs
 - **Testing:** Vitest for unit/integration tests; Playwright for browser E2E flows
 - **CI:** GitHub Actions pipeline
@@ -57,12 +58,16 @@ ScopeGhost audits client communication threads against signed project agreements
 ## Getting Started
 
 ### Prerequisites
+
 1. **Node.js:** v22.5.0 or later (Node 25 recommended)
 2. **Ollama:** Installed and running locally
+
    ```bash
    ollama --version
    ```
+
 3. **Gemma Model:**
+
    ```bash
    ollama pull gemma3:4b
    ```
@@ -83,11 +88,26 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+### Local Analysis Configuration
+
+ScopeGhost sends only the selected project's deliverable scope, its agreement clauses, one request, and that request's relevant evidence excerpts to Ollama at `127.0.0.1:11434`. No hosted-model fallback is configured.
+
+Set `OLLAMA_MODEL` to choose another installed Ollama model. The value must be 1–128 characters using letters, numbers, `.`, `_`, `:`, `/`, or `-`; the default is `gemma3:4b`. Invalid values fail configuration rather than falling back silently.
+
+The qualitative confidence indicator describes review evidence, not statistical probability:
+
+- **HIGH** — direct scope alignment and a verifiable evidence excerpt.
+- **MEDIUM** — relevant evidence exists, but interpretation remains.
+- **LOW** — important scope or evidence gaps remain.
+
+Effort hours are model estimates, not verified evidence or invoice totals. ScopeGhost verifies source IDs and quoted text against supplied excerpts; all currency calculations remain deterministic in TypeScript.
+
 ---
 
 ## One-Click Synthetic Demonstration
 
 ScopeGhost includes a pre-packaged synthetic demonstration project (**"AeroTech Apparel - E-Commerce Portal v2"**):
+
 1. Click **"Load Synthetic Demo"** on the dashboard.
 2. The system seeds:
    - 6 Baseline Agreement Clauses (Storefront, Stripe checkout, Mobile app exclusion, Crypto exclusion, Revision limits, Single locale assumption).
@@ -139,6 +159,7 @@ npm run test:e2e
 ## Explicitly Excluded from MVP
 
 To maintain high reliability, local privacy, and simplicity, the following features are intentionally out of scope:
+
 - Direct SaaS integrations (live Slack bots, Gmail sync, Jira API)
 - Automated email or invoice dispatch (no auto-charging via Stripe/QuickBooks)
 - Scanned PDF image OCR (use text, markdown, or CSV exports)

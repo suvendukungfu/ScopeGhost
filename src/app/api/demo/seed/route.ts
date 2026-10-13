@@ -145,26 +145,26 @@ Do not calculate any additional hours or change orders.
       "SRC-AERO"
     );
 
-    const source = evidenceRepo.createSource({
+    evidenceRepo.createSourceWithChunks({
       projectId: project.id,
+      stableId: "DOC-demo-aerotech-communications",
       filename: "aerotech_client_emails.md",
       fileType: "MARKDOWN",
       rawContent: rawDemoMessages,
       sourceHash: ingestion.sourceHash,
-      metadataJson: JSON.stringify({ itemCount: ingestion.items.length }),
-    });
-
-    const chunkInputs = ingestion.chunks.map((c) => ({
-      sourceId: source.id,
-      projectId: project.id,
+      metadata: {
+        synthetic: true,
+        itemCount: ingestion.items.length,
+        normalizationWarnings: ingestion.normalizationWarnings,
+      },
+    }, ingestion.chunks.map((c) => ({
       chunkIndex: c.chunkIndex,
       stableId: c.stableId,
       textContent: c.textContent,
       author: c.author,
       timestampStr: c.timestampStr,
-    }));
-
-    evidenceRepo.createChunks(chunkInputs);
+      metadata: c.metadata,
+    })), { synthetic: true, itemCount: ingestion.items.length });
 
     return NextResponse.json({ project, success: true }, { status: 201 });
   } catch (err: unknown) {

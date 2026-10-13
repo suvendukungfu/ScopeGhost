@@ -14,17 +14,23 @@ export function sanitizeCsvCell(value: string): string {
     return "";
   }
 
-  if (value.startsWith("\t") || value.startsWith("\r")) {
-    return `'${value}`;
-  }
-
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
+  const normalized = value.replace(/^\uFEFF/, "");
+  if (normalized.length === 0) {
     return "";
   }
 
-  // If first character is a known formula trigger, prepend single quote (')
-  if (FORMULA_TRIGGERS.some((trigger) => trimmed.startsWith(trigger))) {
+  const trimmedLeading = normalized.replace(/^[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200D]+/, "");
+  const firstMeaningfulChar = trimmedLeading.trimStart();
+  if (firstMeaningfulChar.length === 0) {
+    return "";
+  }
+
+  if (
+    normalized.startsWith("\t") ||
+    normalized.startsWith("\r") ||
+    normalized.startsWith("\n") ||
+    FORMULA_TRIGGERS.some((trigger) => firstMeaningfulChar.startsWith(trigger))
+  ) {
     return `'${value}`;
   }
 
@@ -34,12 +40,16 @@ export function sanitizeCsvCell(value: string): string {
 /**
  * Normalizes text content:
  * - Replaces CRLF and CR with standard LF (\n)
- * - Strips zero-width characters and null bytes
+ * - Strips zero-width characters and non-printable control bytes that can hide commands or trigger parser edge cases
  */
 export function normalizeTextContent(content: string): string {
   if (!content) return "";
 
   return content
+    // Remove BOM and zero-width markers
+    .replace(/^\uFEFF/, "")
+    // Strip embedded control characters that can hide malicious payloads or break parsing
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
     // Remove null bytes
     .replace(/\0/g, "")
     // Normalize newlines

@@ -4,6 +4,7 @@ import { ProjectRepository } from "@/lib/db/repositories/projects";
 import { BaselineClauseRepository } from "@/lib/db/repositories/clauses";
 import { EvidenceRepository } from "@/lib/db/repositories/evidence";
 import { FindingsRepository } from "@/lib/db/repositories/findings";
+import { UpdateProjectSchema } from "@/lib/types/schemas";
 
 export async function GET(
   _req: Request,
@@ -58,6 +59,38 @@ export async function DELETE(
 
     projectRepo.delete(id);
     return NextResponse.json({ success: true });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    let payload: unknown;
+    try {
+      payload = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+    }
+    const parsed = UpdateProjectSchema.safeParse(payload);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", details: parsed.error.issues },
+        { status: 400 }
+      );
+    }
+
+    const repo = new ProjectRepository(getDb());
+    const project = repo.update(id, parsed.data);
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    return NextResponse.json({ project });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

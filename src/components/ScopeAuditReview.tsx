@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   Project,
   BaselineClause,
@@ -53,14 +53,19 @@ export function ScopeAuditReview({
   const [editHoursMin, setEditHoursMin] = useState("0");
   const [editHoursMax, setEditHoursMax] = useState("0");
   const [editNotes, setEditNotes] = useState("");
+  const [updatingFindingId, setUpdatingFindingId] = useState<string | null>(null);
+  const auditController = useRef<AbortController | null>(null);
 
   const runAudit = async () => {
     setIsRunningAudit(true);
     setError(null);
+    const controller = new AbortController();
+    auditController.current = controller;
 
     try {
       const res = await fetch(`/api/projects/${project.id}/analyze`, {
         method: "POST",
+        signal: controller.signal,
       });
 
       const data = await res.json();
@@ -70,12 +75,15 @@ export function ScopeAuditReview({
 
       onFindingsUpdated(data.findings);
     } catch (err: unknown) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Audit failed. Make sure Ollama is running locally with 'ollama serve'."
-      );
+      if (!(err instanceof DOMException && err.name === "AbortError")) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Audit failed. Check the local Ollama service and selected model."
+        );
+      }
     } finally {
+      auditController.current = null;
       setIsRunningAudit(false);
     }
   };
@@ -90,6 +98,8 @@ export function ScopeAuditReview({
       humanNotes?: string;
     }
   ) => {
+    setUpdatingFindingId(findingId);
+    setError(null);
     try {
       const res = await fetch(`/api/findings/${findingId}`, {
         method: "PATCH",
@@ -98,14 +108,15 @@ export function ScopeAuditReview({
       });
 
       const data = await res.json();
-      if (res.ok && data.finding) {
-        onFindingsUpdated(
-          findings.map((f) => (f.id === findingId ? data.finding : f))
-        );
-        setEditingFindingId(null);
+      if (!res.ok || !data.finding) {
+        throw new Error(data.error || "Could not save the review decision");
       }
-    } catch (err) {
-      console.error("Failed to update finding decision", err);
+      onFindingsUpdated(findings.map((f) => (f.id === findingId ? data.finding : f)));
+      setEditingFindingId(null);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not save the review decision");
+    } finally {
+      setUpdatingFindingId(null);
     }
   };
 
@@ -188,6 +199,15 @@ export function ScopeAuditReview({
         </div>
 
         <div className="flex items-center gap-3">
+          {isRunningAudit && (
+            <button
+              type="button"
+              onClick={() => auditController.current?.abort()}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-xs font-semibold text-slate-700 hover:border-rose-300 hover:text-rose-800"
+            >
+              Cancel analysis
+            </button>
+          )}
           <button
             onClick={runAudit}
             disabled={isRunningAudit || chunks.length === 0}
@@ -217,6 +237,12 @@ export function ScopeAuditReview({
             </p>
           </div>
         </div>
+      )}
+
+      {findings.length > 0 && (
+        <p className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-xs text-indigo-900">
+          Confidence labels are qualitative review signals, not probabilities. Model effort ranges are estimates, not verified evidence or invoice totals.
+        </p>
       )}
 
       {/* Summary KPI Cards */}
@@ -395,20 +421,26 @@ export function ScopeAuditReview({
                   </div>
 
                   <div className="flex items-center gap-2 text-xs font-semibold">
-                    <span className="flex items-center gap-1 text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md">
+                    <span
+                      title={finding.estimateSource === "HUMAN" ? "Effort adjusted by a human reviewer" : "Model-generated effort estimate"}
+                      className="flex items-center gap-1 text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md"
+                    >
                       <Clock className="w-3.5 h-3.5 text-slate-400" />
                       {finding.estHoursMin === finding.estHoursMax
                         ? `${finding.estHoursMin}h`
                         : `${finding.estHoursMin}h – ${finding.estHoursMax}h`}
+                      <span className="text-2xs text-slate-500">
+                        {finding.estimateSource === "HUMAN" ? "reviewer" : "model"}
+                      </span>
                     </span>
-                    <span className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-md font-bold">
+                    <span
+                      title="Deterministic rate-times-hours estimate; not a final invoice total"
+                      className="flex items-center gap-1 text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-md font-bold"
+                    >
                       <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                      {formatCurrency(
-                        calculateItemCostCents(
-                          finding.estHoursMin,
-                          project.hourlyRateCents
-                        ),
-                        project.currency
+                      {formatCurrency(calculateItemCostCents(finding.estHoursMin, project.hourlyRateCents), project.currency)}
+                      {finding.estHoursMin !== finding.estHoursMax && (
+                        <> – {formatCurrency(calculateItemCostCents(finding.estHoursMax, project.hourlyRateCents), project.currency)}</>
                       )}
                     </span>
                   </div>
@@ -446,6 +478,53 @@ export function ScopeAuditReview({
                   </span>
                   {finding.reasoning}
                 </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold text-slate-800">
+                      {finding.confidenceIndicator} confidence · qualitative
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-slate-600">{finding.confidenceExplanation}</p>
+                  </div>
+                  <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+                    <p className="text-xs font-semibold text-indigo-900">Suggested human next step</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-700">
+                      {finding.nextAction || "Review the cited source and confirm the request with the client."}
+                    </p>
+                  </div>
+                </div>
+                {finding.supportingEvidenceIds.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold text-slate-800">Supporting evidence</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {finding.supportingEvidenceIds.map((evidenceId) => (
+                        <span key={evidenceId} className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 font-mono text-2xs text-indigo-900">
+                          {evidenceId}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {finding.contradictingEvidenceIds.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                    <p className="text-xs font-semibold text-amber-900">Contradicting evidence</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {finding.contradictingEvidenceIds.map((evidenceId) => (
+                        <span key={evidenceId} className="rounded-md border border-amber-200 bg-white px-2 py-1 font-mono text-2xs text-amber-900">
+                          {evidenceId}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {finding.missingInformation.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-stone-50 p-3">
+                    <p className="text-xs font-semibold text-slate-800">What remains unknown</p>
+                    <ul className="mt-1 list-disc pl-5 text-xs leading-5 text-slate-600">
+                      {finding.missingInformation.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
 
                 {/* Edit Form if user is overriding hours or category */}
                 {isEditing && (
@@ -575,9 +654,22 @@ export function ScopeAuditReview({
                           humanStatus: "DISMISSED",
                         })
                       }
-                      className="px-2.5 py-1 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition"
+                      disabled={updatingFindingId === finding.id}
+                      className="px-2.5 py-1 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-md transition disabled:opacity-50"
                     >
-                      Dismiss
+                      Reject
+                    </button>
+                    <button
+                      onClick={() =>
+                        handleUpdateDecision(finding.id, {
+                          humanStatus: "MODIFIED",
+                          classification: "AMBIGUOUS",
+                        })
+                      }
+                      disabled={updatingFindingId === finding.id}
+                      className="px-2.5 py-1 text-amber-800 hover:bg-amber-50 rounded-md transition disabled:opacity-50"
+                    >
+                      Mark ambiguous
                     </button>
 
                     <button
@@ -586,7 +678,8 @@ export function ScopeAuditReview({
                           humanStatus: "ACCEPTED",
                         })
                       }
-                      className="px-3 py-1 text-white bg-emerald-600 hover:bg-emerald-700 font-semibold rounded-md shadow-2xs transition flex items-center gap-1"
+                      disabled={updatingFindingId === finding.id}
+                      className="px-3 py-1 text-white bg-indigo-700 hover:bg-indigo-800 font-semibold rounded-md shadow-2xs transition flex items-center gap-1 disabled:opacity-50"
                     >
                       <Check className="w-3.5 h-3.5" /> Accept in Change Order
                     </button>

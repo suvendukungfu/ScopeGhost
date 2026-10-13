@@ -9,7 +9,12 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = await req.json();
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+    }
 
     const parsed = UpdateFindingDecisionSchema.safeParse(body);
     if (!parsed.success) {

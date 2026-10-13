@@ -23,11 +23,13 @@ export function EvidenceUploader({
   const [pastedFilename, setPastedFilename] = useState("client_emails.txt");
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = async (file: File) => {
     setIsUploading(true);
     setError(null);
+    setWarnings([]);
 
     const formData = new FormData();
     formData.append("file", file);
@@ -42,6 +44,7 @@ export function EvidenceUploader({
       if (!res.ok) throw new Error(data.error || "Failed to upload file");
 
       onEvidenceUploaded(data.source, data.chunks);
+      setWarnings(data.warnings || []);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Upload error");
     } finally {
@@ -55,6 +58,7 @@ export function EvidenceUploader({
 
     setIsUploading(true);
     setError(null);
+    setWarnings([]);
 
     try {
       const res = await fetch(`/api/projects/${projectId}/evidence`, {
@@ -70,6 +74,7 @@ export function EvidenceUploader({
       if (!res.ok) throw new Error(data.error || "Failed to ingest pasted evidence");
 
       onEvidenceUploaded(data.source, data.chunks);
+      setWarnings(data.warnings || []);
       setPastedText("");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Ingestion error");
@@ -82,14 +87,23 @@ export function EvidenceUploader({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-slate-900">
-            Client Evidence Ingestion
+          <h2 className="font-serif text-xl font-semibold text-slate-950">
+            Evidence library
           </h2>
           <p className="text-sm text-slate-500">
             Import client emails, Slack messages, or ticket exports (.txt, .md, .csv).
             Content is sanitized and segmented into traceable, cited chunks.
           </p>
         </div>
+        <p className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-xs text-indigo-900">
+          Imported text is untrusted evidence. Original source text is preserved locally; normalization warnings are shown after import.
+        </p>
+        {warnings.length > 0 && (
+          <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+            <p className="font-semibold">Import notes</p>
+            {warnings.map((warning) => <p key={warning} className="mt-1">{warning}</p>)}
+          </div>
+        )}
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
@@ -138,7 +152,17 @@ export function EvidenceUploader({
                   handleFileUpload(e.dataTransfer.files[0]);
                 }
               }}
-              onClick={() => fileInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              aria-label="Choose or drop a .txt, .md, .markdown, or .csv evidence file"
+              aria-disabled={isUploading}
+              onKeyDown={(event) => {
+                if (!isUploading && (event.key === "Enter" || event.key === " ")) {
+                  event.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              onClick={() => !isUploading && fileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition ${
                 isDragging
                   ? "border-emerald-500 bg-emerald-50/50"
@@ -154,6 +178,7 @@ export function EvidenceUploader({
                   if (e.target.files && e.target.files[0]) {
                     handleFileUpload(e.target.files[0]);
                   }
+                  e.currentTarget.value = "";
                 }}
               />
               <UploadCloud className="w-10 h-10 text-emerald-600 mx-auto mb-3" />
@@ -196,6 +221,39 @@ export function EvidenceUploader({
           )}
         </div>
       </div>
+
+      <section aria-labelledby="source-list-heading" className="space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h3 id="source-list-heading" className="text-sm font-semibold text-slate-900">Imported source documents</h3>
+          <span className="text-xs text-slate-500">{sources.length} local source{sources.length === 1 ? "" : "s"}</span>
+        </div>
+        {sources.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">
+            No sources yet. Import a text, Markdown, or CSV export to create stable evidence references.
+          </div>
+        ) : (
+          <div className="grid gap-2">
+            {sources.map((source) => (
+              <details key={source.id} className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+                <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 text-sm">
+                  <span className="font-medium text-slate-900">{source.filename}</span>
+                  <span className="font-mono text-xs text-indigo-700">{source.stableId}</span>
+                  <span className="text-xs text-slate-500">{source.fileType} · {new Date(source.createdAt).toLocaleString()}</span>
+                  {source.metadata.synthetic === true && (
+                    <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-2xs font-semibold text-sky-800">Synthetic demo data</span>
+                  )}
+                </summary>
+                <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-slate-100 bg-stone-50 p-3 text-xs leading-5 text-slate-700">{source.rawContent}</pre>
+                {Array.isArray(source.metadata.normalizationWarnings) && source.metadata.normalizationWarnings.length > 0 && (
+                  <p className="mt-2 text-xs text-amber-800">
+                    {source.metadata.normalizationWarnings.join(" ")} The original above is unchanged.
+                  </p>
+                )}
+              </details>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Extracted Evidence Chunks Preview */}
       <div className="space-y-3">

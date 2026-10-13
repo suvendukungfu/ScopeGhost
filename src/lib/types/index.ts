@@ -30,6 +30,14 @@ export interface Project {
   updatedAt: string;
 }
 
+export interface ProjectDashboardItem extends Project {
+  pendingReviewCount: number;
+  evidenceCount: number;
+  status: "SETUP" | "ACTIVE" | "NEEDS_REVIEW";
+}
+
+export type ScopeItem = BaselineClause;
+
 export interface BaselineClause {
   id: string;
   projectId: string;
@@ -42,14 +50,18 @@ export interface BaselineClause {
 
 export interface EvidenceSource {
   id: string;
+  stableId: string;
   projectId: string;
   filename: string;
   fileType: FileType;
   rawContent: string;
   sourceHash: string;
   metadataJson: string;
+  metadata: Record<string, unknown>;
   createdAt: string;
 }
+
+export type SourceDocument = EvidenceSource;
 
 export interface EvidenceChunk {
   id: string;
@@ -60,6 +72,24 @@ export interface EvidenceChunk {
   textContent: string;
   author?: string | null;
   timestampStr?: string | null;
+  metadata: Record<string, string>;
+}
+
+export type SourceExcerpt = EvidenceChunk;
+
+export interface ClientRequest {
+  id: string;
+  projectId: string;
+  sourceExcerptId: string;
+  requestText: string;
+  createdAt: string;
+}
+
+export interface Estimate {
+  hoursMin: number;
+  hoursMax: number;
+  source: "MODEL" | "HUMAN";
+  confidence: "LOW" | "MEDIUM" | "HIGH";
 }
 
 export interface AnalysisRun {
@@ -88,9 +118,21 @@ export interface ScopeFinding {
   confidenceScore: number;
   estHoursMin: number;
   estHoursMax: number;
+  supportingEvidenceIds: string[];
+  contradictingEvidenceIds: string[];
+  missingInformation: string[];
+  confidenceIndicator: "LOW" | "MEDIUM" | "HIGH";
+  confidenceExplanation: string;
+  nextAction: string;
+  estimateSource: "MODEL" | "HUMAN";
   humanStatus: HumanDecision;
   humanNotes?: string | null;
   createdAt: string;
+}
+
+export interface Finding extends ScopeFinding {
+  nextAction: string;
+  estimate: Estimate | null;
 }
 
 export interface ChangeOrder {
@@ -108,4 +150,20 @@ export interface ChangeOrder {
   humanDisclaimer: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ChangeOrderDraft = ChangeOrder;
+
+export interface AuditEvent {
+  id: string;
+  projectId: string;
+  eventType:
+    | "SOURCE_IMPORTED"
+    | "ANALYSIS_COMPLETED"
+    | "FINDING_REVIEWED"
+    | "CHANGE_ORDER_DRAFTED"
+    | "CHANGE_ORDER_UPDATED"
+  entityId: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
 }

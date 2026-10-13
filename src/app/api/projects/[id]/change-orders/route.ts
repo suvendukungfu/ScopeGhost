@@ -14,7 +14,12 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const body = await req.json();
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Request body must be valid JSON" }, { status: 400 });
+    }
 
     const parsed = CreateChangeOrderSchema.safeParse(body);
     if (!parsed.success) {
@@ -38,10 +43,16 @@ export async function POST(
       parsed.data.selectedFindingIds.includes(f.id)
     );
 
-    if (selectedFindings.length === 0) {
+    if (selectedFindings.length !== parsed.data.selectedFindingIds.length) {
       return NextResponse.json(
-        { error: "No valid findings selected for change order" },
+        { error: "One or more selected findings do not belong to this project" },
         { status: 400 }
+      );
+    }
+    if (selectedFindings.some((finding) => finding.humanStatus !== "ACCEPTED")) {
+      return NextResponse.json(
+        { error: "Only findings explicitly accepted by a human reviewer can be included" },
+        { status: 409 }
       );
     }
 

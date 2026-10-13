@@ -1,5 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 
+function hasColumn(db: DatabaseSync, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return rows.some((row) => row.name === column);
+}
+
 export function runMigrations(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
@@ -28,6 +33,7 @@ export function runMigrations(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS evidence_sources (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
+      stable_id TEXT NOT NULL DEFAULT '',
       filename TEXT NOT NULL,
       file_type TEXT NOT NULL CHECK(file_type IN ('TXT', 'MARKDOWN', 'CSV')),
       raw_content TEXT NOT NULL,
@@ -46,6 +52,7 @@ export function runMigrations(db: DatabaseSync): void {
       text_content TEXT NOT NULL,
       author TEXT,
       timestamp_str TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
       FOREIGN KEY(source_id) REFERENCES evidence_sources(id) ON DELETE CASCADE,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
@@ -79,6 +86,13 @@ export function runMigrations(db: DatabaseSync): void {
       est_hours_max REAL NOT NULL DEFAULT 0,
       human_status TEXT NOT NULL DEFAULT 'PENDING' CHECK(human_status IN ('PENDING', 'ACCEPTED', 'DISMISSED', 'MODIFIED')),
       human_notes TEXT,
+      supporting_evidence_json TEXT NOT NULL DEFAULT '[]',
+      contradicting_evidence_json TEXT NOT NULL DEFAULT '[]',
+      missing_information_json TEXT NOT NULL DEFAULT '[]',
+      confidence_indicator TEXT NOT NULL DEFAULT 'MEDIUM',
+      confidence_explanation TEXT NOT NULL DEFAULT '',
+      next_action TEXT NOT NULL DEFAULT '',
+      estimate_source TEXT NOT NULL DEFAULT 'MODEL',
       created_at TEXT NOT NULL,
       FOREIGN KEY(run_id) REFERENCES analysis_runs(id) ON DELETE CASCADE,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
@@ -103,10 +117,53 @@ export function runMigrations(db: DatabaseSync): void {
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK(event_type IN (
+        'SOURCE_IMPORTED', 'ANALYSIS_COMPLETED', 'FINDING_REVIEWED',
+        'CHANGE_ORDER_DRAFTED', 'CHANGE_ORDER_UPDATED'
+      )),
+      entity_id TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_clauses_project ON baseline_clauses(project_id);
     CREATE INDEX IF NOT EXISTS idx_sources_project ON evidence_sources(project_id);
     CREATE INDEX IF NOT EXISTS idx_chunks_project ON evidence_chunks(project_id);
     CREATE INDEX IF NOT EXISTS idx_findings_project ON scope_findings(project_id);
     CREATE INDEX IF NOT EXISTS idx_change_orders_project ON change_orders(project_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_events_project ON audit_events(project_id, created_at);
+  `);
+
+  if (!hasColumn(db, "evidence_sources", "stable_id")) {
+    db.exec("ALTER TABLE evidence_sources ADD COLUMN stable_id TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, "evidence_chunks", "metadata_json")) {
+    db.exec("ALTER TABLE evidence_chunks ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'");
+  }
+
+  const findingColumns: Array<[string, string]> = [
+    ["supporting_evidence_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ["contradicting_evidence_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ["missing_information_json", "TEXT NOT NULL DEFAULT '[]'"],
+    ["confidence_indicator", "TEXT NOT NULL DEFAULT 'MEDIUM'"],
+    ["confidence_explanation", "TEXT NOT NULL DEFAULT ''"],
+    ["next_action", "TEXT NOT NULL DEFAULT ''"],
+    ["estimate_source", "TEXT NOT NULL DEFAULT 'MODEL'"],
+  ];
+  for (const [column, definition] of findingColumns) {
+    if (!hasColumn(db, "scope_findings", column)) {
+      db.exec(`ALTER TABLE scope_findings ADD COLUMN ${column} ${definition}`);
+    }
+  }
+
+  db.exec(`
+    UPDATE evidence_sources SET stable_id = 'DOC-' || id
+    WHERE stable_id IS NULL OR stable_id = '';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_source_stable_id
+      ON evidence_sources(project_id, stable_id);
   `);
 }

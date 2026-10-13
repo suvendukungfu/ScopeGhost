@@ -30,6 +30,13 @@ export interface CreateScopeFindingInput {
   confidenceScore: number;
   estHoursMin: number;
   estHoursMax: number;
+  supportingEvidenceIds?: string[];
+  contradictingEvidenceIds?: string[];
+  missingInformation?: string[];
+  confidenceIndicator?: "LOW" | "MEDIUM" | "HIGH";
+  confidenceExplanation?: string;
+  nextAction?: string;
+  estimateSource?: "MODEL" | "HUMAN";
 }
 
 export interface CreateChangeOrderInput {
@@ -63,6 +70,13 @@ interface FindingRow {
   est_hours_max: number;
   human_status: HumanDecision;
   human_notes: string | null;
+  supporting_evidence_json: string;
+  contradicting_evidence_json: string;
+  missing_information_json: string;
+  confidence_indicator: "LOW" | "MEDIUM" | "HIGH";
+  confidence_explanation: string;
+  next_action: string;
+  estimate_source: "MODEL" | "HUMAN";
   created_at: string;
 }
 
@@ -100,6 +114,13 @@ function mapRowToFinding(row: FindingRow): ScopeFinding {
     confidenceScore: row.confidence_score,
     estHoursMin: row.est_hours_min,
     estHoursMax: row.est_hours_max,
+    supportingEvidenceIds: JSON.parse(row.supporting_evidence_json || "[]"),
+    contradictingEvidenceIds: JSON.parse(row.contradicting_evidence_json || "[]"),
+    missingInformation: JSON.parse(row.missing_information_json || "[]"),
+    confidenceIndicator: row.confidence_indicator,
+    confidenceExplanation: row.confidence_explanation,
+    nextAction: row.next_action,
+    estimateSource: row.estimate_source,
     humanStatus: row.human_status,
     humanNotes: row.human_notes,
     createdAt: row.created_at,
@@ -127,6 +148,38 @@ function mapRowToChangeOrder(row: ChangeOrderRow): ChangeOrder {
 
 export class FindingsRepository {
   constructor(private db: DatabaseSync) {}
+
+  private withTransaction<T>(write: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = write();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private writeAuditEvent(
+    projectId: string,
+    eventType: "FINDING_REVIEWED" | "CHANGE_ORDER_DRAFTED" | "CHANGE_ORDER_UPDATED",
+    entityId: string,
+    metadata: Record<string, unknown>
+  ): void {
+    this.db.prepare(`
+      INSERT INTO audit_events (
+        id, project_id, event_type, entity_id, metadata_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      crypto.randomUUID(),
+      projectId,
+      eventType,
+      entityId,
+      JSON.stringify(metadata),
+      new Date().toISOString()
+    );
+  }
 
   createRun(input: CreateAnalysisRunInput): AnalysisRun {
     const id = crypto.randomUUID();
@@ -166,63 +219,88 @@ export class FindingsRepository {
   }
 
   createFindings(inputs: CreateScopeFindingInput[]): ScopeFinding[] {
-    const stmt = this.db.prepare(`
-      INSERT INTO scope_findings (
-        id, run_id, project_id, evidence_chunk_id, matched_clause_id,
-        classification, title, reasoning, cited_request_quote, cited_clause_quote,
-        is_request_quote_verified, is_clause_quote_verified, confidence_score,
-        est_hours_min, est_hours_max, human_status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    return this.withTransaction(() => {
+      const stmt = this.db.prepare(`
+        INSERT INTO scope_findings (
+          id, run_id, project_id, evidence_chunk_id, matched_clause_id,
+          classification, title, reasoning, cited_request_quote, cited_clause_quote,
+          is_request_quote_verified, is_clause_quote_verified, confidence_score,
+          est_hours_min, est_hours_max, human_status, human_notes,
+          supporting_evidence_json, contradicting_evidence_json, missing_information_json,
+          confidence_indicator, confidence_explanation, next_action, estimate_source, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const results: ScopeFinding[] = [];
+      const now = new Date().toISOString();
 
-    const results: ScopeFinding[] = [];
-    const now = new Date().toISOString();
+      for (const input of inputs) {
+        const id = crypto.randomUUID();
+        const supportingEvidenceIds = input.supportingEvidenceIds ?? [];
+        const contradictingEvidenceIds = input.contradictingEvidenceIds ?? [];
+        const missingInformation = input.missingInformation ?? [];
+        const confidenceIndicator = input.confidenceIndicator ?? "MEDIUM";
+        const confidenceExplanation = input.confidenceExplanation ?? "";
+        const nextAction = input.nextAction ?? "";
+        const estimateSource = input.estimateSource ?? "MODEL";
+        stmt.run(
+          id,
+          input.runId,
+          input.projectId,
+          input.evidenceChunkId,
+          input.matchedClauseId ?? null,
+          input.classification,
+          input.title,
+          input.reasoning,
+          input.citedRequestQuote,
+          input.citedClauseQuote ?? null,
+          input.isRequestQuoteVerified ? 1 : 0,
+          input.isClauseQuoteVerified ? 1 : 0,
+          input.confidenceScore,
+          input.estHoursMin,
+          input.estHoursMax,
+          "PENDING",
+          null,
+          JSON.stringify(supportingEvidenceIds),
+          JSON.stringify(contradictingEvidenceIds),
+          JSON.stringify(missingInformation),
+          confidenceIndicator,
+          confidenceExplanation,
+          nextAction,
+          estimateSource,
+          now
+        );
 
-    for (const input of inputs) {
-      const id = crypto.randomUUID();
-      stmt.run(
-        id,
-        input.runId,
-        input.projectId,
-        input.evidenceChunkId,
-        input.matchedClauseId ?? null,
-        input.classification,
-        input.title,
-        input.reasoning,
-        input.citedRequestQuote,
-        input.citedClauseQuote ?? null,
-        input.isRequestQuoteVerified ? 1 : 0,
-        input.isClauseQuoteVerified ? 1 : 0,
-        input.confidenceScore,
-        input.estHoursMin,
-        input.estHoursMax,
-        "PENDING",
-        now
-      );
+        results.push({
+          id,
+          runId: input.runId,
+          projectId: input.projectId,
+          evidenceChunkId: input.evidenceChunkId,
+          matchedClauseId: input.matchedClauseId ?? null,
+          classification: input.classification,
+          title: input.title,
+          reasoning: input.reasoning,
+          citedRequestQuote: input.citedRequestQuote,
+          citedClauseQuote: input.citedClauseQuote ?? null,
+          isRequestQuoteVerified: input.isRequestQuoteVerified,
+          isClauseQuoteVerified: input.isClauseQuoteVerified,
+          confidenceScore: input.confidenceScore,
+          estHoursMin: input.estHoursMin,
+          estHoursMax: input.estHoursMax,
+          supportingEvidenceIds,
+          contradictingEvidenceIds,
+          missingInformation,
+          confidenceIndicator,
+          confidenceExplanation,
+          nextAction,
+          estimateSource,
+          humanStatus: "PENDING",
+          humanNotes: null,
+          createdAt: now,
+        });
+      }
 
-      results.push({
-        id,
-        runId: input.runId,
-        projectId: input.projectId,
-        evidenceChunkId: input.evidenceChunkId,
-        matchedClauseId: input.matchedClauseId ?? null,
-        classification: input.classification,
-        title: input.title,
-        reasoning: input.reasoning,
-        citedRequestQuote: input.citedRequestQuote,
-        citedClauseQuote: input.citedClauseQuote ?? null,
-        isRequestQuoteVerified: input.isRequestQuoteVerified,
-        isClauseQuoteVerified: input.isClauseQuoteVerified,
-        confidenceScore: input.confidenceScore,
-        estHoursMin: input.estHoursMin,
-        estHoursMax: input.estHoursMax,
-        humanStatus: "PENDING",
-        humanNotes: null,
-        createdAt: now,
-      });
-    }
-
-    return results;
+      return results;
+    });
   }
 
   findFindingsByProjectId(projectId: string): ScopeFinding[] {
@@ -251,6 +329,18 @@ export class FindingsRepository {
     const newHoursMin = decision.estHoursMin ?? existing.est_hours_min;
     const newHoursMax = decision.estHoursMax ?? existing.est_hours_max;
     const newNotes = decision.humanNotes !== undefined ? decision.humanNotes : existing.human_notes;
+    if (
+      !Number.isFinite(newHoursMin) ||
+      !Number.isFinite(newHoursMax) ||
+      newHoursMin < 0 ||
+      newHoursMax < newHoursMin
+    ) {
+      throw new Error("Maximum effort estimate cannot be lower than minimum");
+    }
+    const estimateSource =
+      decision.estHoursMin !== undefined || decision.estHoursMax !== undefined
+        ? "HUMAN"
+        : existing.estimate_source;
 
     const stmt = this.db.prepare(`
       UPDATE scope_findings SET
@@ -258,21 +348,29 @@ export class FindingsRepository {
         human_notes = ?,
         classification = ?,
         est_hours_min = ?,
-        est_hours_max = ?
+        est_hours_max = ?,
+        estimate_source = ?
       WHERE id = ?
     `);
 
-    stmt.run(
-      decision.humanStatus,
-      newNotes,
-      newClassification,
-      newHoursMin,
-      newHoursMax,
-      id
-    );
-
-    const updatedRow = getStmt.get(id) as unknown as FindingRow;
-    return mapRowToFinding(updatedRow);
+    return this.withTransaction(() => {
+      stmt.run(
+        decision.humanStatus,
+        newNotes,
+        newClassification,
+        newHoursMin,
+        newHoursMax,
+        estimateSource,
+        id
+      );
+      this.writeAuditEvent(existing.project_id, "FINDING_REVIEWED", id, {
+        humanStatus: decision.humanStatus,
+        classification: newClassification,
+        estimateSource,
+      });
+      const updatedRow = getStmt.get(id) as unknown as FindingRow;
+      return mapRowToFinding(updatedRow);
+    });
   }
 
   createChangeOrder(input: CreateChangeOrderInput): ChangeOrder {
@@ -288,22 +386,28 @@ export class FindingsRepository {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(
-      id,
-      input.projectId,
-      input.orderNumber,
-      input.title,
-      "DRAFT",
-      JSON.stringify(input.selectedFindingIds),
-      input.totalHoursMin,
-      input.totalHoursMax,
-      input.totalCostMinCents,
-      input.totalCostMaxCents,
-      input.generatedMarkdown,
-      input.humanDisclaimer,
-      now,
-      now
-    );
+    this.withTransaction(() => {
+      stmt.run(
+        id,
+        input.projectId,
+        input.orderNumber,
+        input.title,
+        "DRAFT",
+        JSON.stringify(input.selectedFindingIds),
+        input.totalHoursMin,
+        input.totalHoursMax,
+        input.totalCostMinCents,
+        input.totalCostMaxCents,
+        input.generatedMarkdown,
+        input.humanDisclaimer,
+        now,
+        now
+      );
+      this.writeAuditEvent(input.projectId, "CHANGE_ORDER_DRAFTED", id, {
+        orderNumber: input.orderNumber,
+        findingCount: input.selectedFindingIds.length,
+      });
+    });
 
     return {
       id,
@@ -329,5 +433,32 @@ export class FindingsRepository {
     );
     const rows = stmt.all(projectId) as unknown as ChangeOrderRow[];
     return rows.map(mapRowToChangeOrder);
+  }
+
+  updateChangeOrder(
+    projectId: string,
+    orderId: string,
+    input: { title?: string; generatedMarkdown?: string; status?: "DRAFT" | "APPROVED" }
+  ): ChangeOrder | null {
+    const select = this.db.prepare(
+      "SELECT * FROM change_orders WHERE id = ? AND project_id = ?"
+    );
+    const existing = select.get(orderId, projectId) as unknown as ChangeOrderRow | undefined;
+    if (!existing) return null;
+
+    const title = input.title ?? existing.title;
+    const markdown = input.generatedMarkdown ?? existing.generated_markdown;
+    const status = input.status ?? existing.status;
+    const updatedAt = new Date().toISOString();
+    this.withTransaction(() => {
+      this.db.prepare(`
+        UPDATE change_orders
+        SET title = ?, generated_markdown = ?, status = ?, updated_at = ?
+        WHERE id = ? AND project_id = ?
+      `).run(title, markdown, status, updatedAt, orderId, projectId);
+      this.writeAuditEvent(projectId, "CHANGE_ORDER_UPDATED", orderId, { status });
+    });
+    const updated = select.get(orderId, projectId) as unknown as ChangeOrderRow;
+    return mapRowToChangeOrder(updated);
   }
 }

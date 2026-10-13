@@ -7,23 +7,34 @@ import {
   ParsedItem,
 } from "./parsers";
 import { chunkParsedItems, computeContentHash, EvidenceChunkData } from "./chunker";
+import { FileTypeSchema } from "@/lib/types/schemas";
+
+export class UnsupportedEvidenceFormatError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnsupportedEvidenceFormatError";
+  }
+}
 
 export interface IngestionResult {
   sourceHash: string;
   fileType: FileType;
   items: ParsedItem[];
   chunks: EvidenceChunkData[];
+  normalizationWarnings: string[];
 }
 
 /**
  * Detects file type from filename extension if not explicitly provided
  */
-export function detectFileType(filename: string, fallback: FileType = "TXT"): FileType {
+export function detectFileType(filename: string): FileType {
   const ext = filename.split(".").pop()?.toLowerCase();
   if (ext === "csv") return "CSV";
   if (ext === "md" || ext === "markdown") return "MARKDOWN";
   if (ext === "txt") return "TXT";
-  return fallback;
+  throw new UnsupportedEvidenceFormatError(
+    `Unsupported evidence format for "${filename}". Supported formats are .txt, .md, .markdown, and .csv.`
+  );
 }
 
 /**
@@ -35,9 +46,25 @@ export function processEvidenceDocument(
   explicitType?: FileType,
   sourcePrefix = "SRC-01"
 ): IngestionResult {
-  const fileType = explicitType || detectFileType(filename);
+  const detectedType = detectFileType(filename);
+  const parsedExplicitType = explicitType
+    ? FileTypeSchema.safeParse(explicitType)
+    : undefined;
+  if (parsedExplicitType && !parsedExplicitType.success) {
+    throw new UnsupportedEvidenceFormatError(
+      "Unsupported evidence format. Supported formats are TXT, MARKDOWN, and CSV."
+    );
+  }
+  const fileType = parsedExplicitType?.success ? parsedExplicitType.data : detectedType;
+  if (typeof rawContent !== "string" || rawContent.trim().length === 0) {
+    throw new Error("Evidence file is empty. Add text before importing.");
+  }
+
   const normalized = normalizeTextContent(rawContent);
-  const sourceHash = computeContentHash(normalized);
+  if (normalized.trim().length === 0) {
+    throw new Error("Evidence file contains no readable text after normalization.");
+  }
+  const sourceHash = computeContentHash(rawContent);
 
   let items: ParsedItem[] = [];
   switch (fileType) {
@@ -65,6 +92,10 @@ export function processEvidenceDocument(
     fileType,
     items,
     chunks,
+    normalizationWarnings:
+      normalized === rawContent
+        ? []
+        : ["Imported text was normalized; the original text is retained unchanged."],
   };
 }
 

@@ -5,6 +5,9 @@ import {
   ModelFindingItemSchema,
   ModelScopeAnalysisOutputSchema,
   UpdateFindingDecisionSchema,
+  UpdateProjectSchema,
+  EvidenceUploadRequestSchema,
+  ScopeAnalysisResultSchema,
 } from "./schemas";
 
 describe("Zod Validation Schemas", () => {
@@ -43,6 +46,51 @@ describe("Zod Validation Schemas", () => {
       };
       const result = CreateProjectSchema.safeParse(empty);
       expect(result.success).toBe(false);
+    });
+
+    it("rejects invalid currency codes and trims user-provided names", () => {
+      expect(CreateProjectSchema.safeParse({
+        name: "  New project  ",
+        clientName: "Client",
+        currency: "US dollars",
+        hourlyRateCents: 10000,
+        originalBudgetCents: 100000,
+      }).success).toBe(false);
+      const parsed = CreateProjectSchema.safeParse({
+        name: "  New project  ",
+        clientName: "  Client  ",
+        hourlyRateCents: 10000,
+        originalBudgetCents: 100000,
+      });
+      expect(parsed.success).toBe(true);
+      if (parsed.success) expect(parsed.data.name).toBe("New project");
+    });
+  });
+
+  describe("Import and update validation", () => {
+    it("rejects empty evidence, unsupported formats, and extra request fields", () => {
+      expect(EvidenceUploadRequestSchema.safeParse({
+        filename: "notes.pdf",
+        rawContent: "content",
+        fileType: "PDF",
+      }).success).toBe(false);
+      expect(EvidenceUploadRequestSchema.safeParse({
+        filename: "notes.txt",
+        rawContent: "",
+      }).success).toBe(false);
+      expect(EvidenceUploadRequestSchema.safeParse({
+        filename: "notes.txt",
+        rawContent: "content",
+        unknownField: true,
+      }).success).toBe(false);
+    });
+
+    it("requires a non-empty validated project update", () => {
+      expect(UpdateProjectSchema.safeParse({}).success).toBe(false);
+      expect(UpdateProjectSchema.safeParse({ hourlyRateCents: -1 }).success).toBe(false);
+      expect(UpdateProjectSchema.safeParse({ currency: "US" }).success).toBe(false);
+      expect(UpdateProjectSchema.safeParse({ revisionLimit: 3 }).success).toBe(true);
+      expect(UpdateProjectSchema.safeParse({ name: "valid", ignored: true }).success).toBe(false);
     });
   });
 
@@ -152,6 +200,36 @@ describe("Zod Validation Schemas", () => {
       };
       const result = UpdateFindingDecisionSchema.safeParse(update);
       expect(result.success).toBe(true);
+    });
+
+    describe("Structured single-request analysis response", () => {
+      it("rejects invalid confidence, unsupported fields, and inverted estimates", () => {
+        const valid = {
+          classification: "AMBIGUOUS",
+          explanation: "The requirements conflict.",
+          supportingEvidence: [],
+          contradictingEvidence: [],
+          missingInformation: ["Expected platform"],
+          confidence: "LOW",
+          confidenceExplanation: "A key requirement is unknown.",
+          estimatedHoursMin: 2,
+          estimatedHoursMax: 5,
+          nextAction: "Clarify platform support.",
+        };
+        expect(ScopeAnalysisResultSchema.safeParse(valid).success).toBe(true);
+        expect(ScopeAnalysisResultSchema.safeParse({
+          ...valid,
+          confidence: "99%",
+        }).success).toBe(false);
+        expect(ScopeAnalysisResultSchema.safeParse({
+          ...valid,
+          estimatedHoursMax: 1,
+        }).success).toBe(false);
+        expect(ScopeAnalysisResultSchema.safeParse({
+          ...valid,
+          finalInvoiceTotal: 500,
+        }).success).toBe(false);
+      });
     });
   });
 });

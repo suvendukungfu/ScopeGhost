@@ -21,6 +21,12 @@ describe("Evidence Ingestion & Sanitization Engine", () => {
       expect(sanitizeCsvCell("\tmalicious")).toBe("'\tmalicious");
     });
 
+    it("escapes formula-like values even when preceded by whitespace or control characters", () => {
+      expect(sanitizeCsvCell(" =1+1")).toBe("' =1+1");
+      expect(sanitizeCsvCell("\uFEFF@SUM(A1:A2)")).toBe("'\uFEFF@SUM(A1:A2)");
+      expect(sanitizeCsvCell("\u0001+cmd")).toBe("'\u0001+cmd");
+    });
+
     it("leaves safe regular text untouched", () => {
       expect(sanitizeCsvCell("Hello world")).toBe("Hello world");
       expect(sanitizeCsvCell("Feature request: add export button")).toBe(
@@ -38,8 +44,8 @@ describe("Evidence Ingestion & Sanitization Engine", () => {
       expect(normalized).toBe("Line 1\nLine 2\nLine 3");
     });
 
-    it("strips zero-width unicode characters", () => {
-      const invisible = "hello\u200Bworld\uFEFF";
+    it("strips zero-width unicode characters and control bytes", () => {
+      const invisible = "hello\u200Bworld\uFEFF\u0001\u0007";
       expect(normalizeTextContent(invisible)).toBe("helloworld");
     });
   });
@@ -124,7 +130,37 @@ describe("Evidence Ingestion & Sanitization Engine", () => {
       expect(detectFileType("requests.csv")).toBe("CSV");
       expect(detectFileType("notes.md")).toBe("MARKDOWN");
       expect(detectFileType("chat.txt")).toBe("TXT");
-      expect(detectFileType("unknown_file")).toBe("TXT");
+      expect(() => detectFileType("archive.pdf")).toThrow(/Unsupported evidence format/);
+      expect(() => detectFileType("unknown_file")).toThrow(/Supported formats/);
+    });
+
+    it("rejects empty files and preserves a warning when text normalization changes input", () => {
+      expect(() => processEvidenceDocument(" \n ", "notes.txt")).toThrow(/empty/);
+      const original = "Request\u0001 from client\r\nPlease add export.";
+      const result = processEvidenceDocument(original, "notes.txt");
+      expect(result.normalizationWarnings).toHaveLength(1);
+      expect(result.chunks[0].textContent).toContain("Request from client");
+    });
+
+    it("rejects malformed CSV rather than silently accepting partial records", () => {
+      expect(() => parseCsvRows('Author,Message\nAlice,"unfinished')).toThrow(
+        /unterminated quoted field/
+      );
+      expect(() => parseCsvRows('Author,Message\nAlice,hello"world')).toThrow(
+        /quote inside an unquoted field/
+      );
+      expect(() => parseCsvRows('Author,Message\nAlice,"hello"x')).toThrow(
+        /unexpected character after closing quote/
+      );
+    });
+
+    it("keeps duplicate and blank CSV headers addressable in row metadata", () => {
+      const [item] = parseCsvContent("Message,Message,\nFirst,Second,Third");
+      expect(item.metadata).toEqual({
+        message: "First",
+        message_2: "Second",
+        column_3: "Third",
+      });
     });
   });
 });

@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { Project } from "@/lib/types";
+import { Project, ProjectDashboardItem } from "@/lib/types";
 import crypto from "node:crypto";
 
 export interface CreateProjectInput {
@@ -30,6 +30,11 @@ interface ProjectRow {
   revision_limit: number;
   created_at: string;
   updated_at: string;
+}
+
+interface ProjectDashboardRow extends ProjectRow {
+  pending_review_count: number;
+  evidence_count: number;
 }
 
 function mapRowToProject(row: ProjectRow): Project {
@@ -95,6 +100,35 @@ export class ProjectRepository {
     const stmt = this.db.prepare("SELECT * FROM projects ORDER BY created_at DESC");
     const rows = stmt.all() as unknown as ProjectRow[];
     return rows.map(mapRowToProject);
+  }
+
+  findAllWithSummary(): ProjectDashboardItem[] {
+    const rows = this.db.prepare(`
+      SELECT
+        p.*,
+        (
+          SELECT COUNT(*) FROM scope_findings f
+          WHERE f.project_id = p.id AND f.human_status = 'PENDING'
+        ) AS pending_review_count,
+        (
+          SELECT COUNT(*) FROM evidence_sources s
+          WHERE s.project_id = p.id
+        ) AS evidence_count
+      FROM projects p
+      ORDER BY p.created_at DESC
+    `).all() as unknown as ProjectDashboardRow[];
+
+    return rows.map((row) => ({
+      ...mapRowToProject(row),
+      pendingReviewCount: row.pending_review_count,
+      evidenceCount: row.evidence_count,
+      status:
+        row.pending_review_count > 0
+          ? "NEEDS_REVIEW"
+          : row.evidence_count > 0
+            ? "ACTIVE"
+            : "SETUP",
+    }));
   }
 
   update(id: string, input: UpdateProjectInput): Project | null {

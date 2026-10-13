@@ -2,22 +2,29 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { Project } from "@/lib/types";
+import { Project, ProjectDashboardItem } from "@/lib/types";
 import { formatCurrency } from "@/lib/financial";
 import { ProjectFormModal } from "./ProjectFormModal";
 import { Plus, ArrowRight, FolderKanban, Sparkles, Trash2, Clock, DollarSign } from "lucide-react";
 
 interface Props {
-  initialProjects: Project[];
+  initialProjects: ProjectDashboardItem[];
 }
 
 export function ProjectList({ initialProjects }: Props) {
-  const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const [projects, setProjects] = useState<ProjectDashboardItem[]>(initialProjects);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSeedingDemo, setIsSeedingDemo] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleCreated = (newProject: Project) => {
-    setProjects([newProject, ...projects]);
+    setProjects([{
+      ...newProject,
+      pendingReviewCount: 0,
+      evidenceCount: 0,
+      status: "SETUP",
+    }, ...projects]);
   };
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -28,42 +35,83 @@ export function ProjectList({ initialProjects }: Props) {
       return;
     }
 
+    setDeletingId(id);
+    setError(null);
     try {
       const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
       if (res.ok) {
         setProjects(projects.filter((p) => p.id !== id));
+      } else {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to delete project");
       }
-    } catch (err) {
-      console.error("Failed to delete project", err);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to delete project");
+    } finally {
+      setDeletingId(null);
     }
   };
 
   const handleLoadDemo = async () => {
     setIsSeedingDemo(true);
+    setError(null);
     try {
       const res = await fetch("/api/demo/seed", { method: "POST" });
       const data = await res.json();
-      if (res.ok && data.project) {
-        setProjects([data.project, ...projects.filter((p) => p.id !== data.project.id)]);
+      if (!res.ok || !data.project) {
+        throw new Error(data.error || "Failed to load the synthetic demo");
       }
-    } catch (err) {
-      console.error("Failed to seed demo project", err);
+      setProjects([{
+        ...data.project,
+        pendingReviewCount: 0,
+        evidenceCount: 1,
+        status: "ACTIVE",
+      }, ...projects.filter((p) => p.id !== data.project.id)]);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to load the synthetic demo");
     } finally {
       setIsSeedingDemo(false);
     }
   };
+  const totalPendingReviews = projects.reduce(
+    (total, project) => total + project.pendingReviewCount,
+    0
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Active Projects
+          <h1 className="font-serif text-3xl tracking-tight text-slate-950">
+            Project portfolio
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
             Compare agreements against client communications with verifiable citations.
           </p>
         </div>
+
+        {error && (
+          <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+            {error}
+          </p>
+        )}
+
+        {projects.length > 0 && (
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <dt className="text-xs font-medium text-slate-500">Projects in workspace</dt>
+              <dd className="mt-1 text-xl font-semibold text-slate-900">{projects.length}</dd>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <dt className="text-xs font-medium text-slate-500">Projects with imported evidence</dt>
+              <dd className="mt-1 text-xl font-semibold text-slate-900">{projects.filter((project) => project.evidenceCount > 0).length}</dd>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <dt className="text-xs font-medium text-slate-500">Pending human review</dt>
+              <dd className="mt-1 text-xl font-semibold text-slate-900">{totalPendingReviews}</dd>
+            </div>
+          </dl>
+        )}
 
         <div className="flex items-center gap-3">
           <button
@@ -111,29 +159,56 @@ export function ProjectList({ initialProjects }: Props) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {projects.map((project) => (
-            <Link
+            <article
               key={project.id}
-              href={`/projects/${project.id}`}
-              className="group p-5 bg-white border border-slate-200 rounded-xl hover:border-emerald-500/50 hover:shadow-md transition flex flex-col justify-between"
+              className="group p-5 bg-white border border-slate-200 rounded-xl hover:border-indigo-300 hover:shadow-sm transition flex flex-col justify-between"
             >
               <div className="space-y-3">
                 <div className="flex items-start justify-between">
                   <div>
-                    <span className="text-2xs font-semibold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                    <span className="text-2xs font-semibold uppercase tracking-wider text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
                       {project.clientName}
                     </span>
-                    <h2 className="text-base font-bold text-slate-900 group-hover:text-emerald-700 transition mt-1.5">
-                      {project.name}
+                    <h2 className="text-base font-bold text-slate-900 group-hover:text-indigo-700 transition mt-1.5">
+                      <Link href={`/projects/${project.id}`} aria-label={`Open ${project.name}`}>
+                        {project.name}
+                      </Link>
                     </h2>
                   </div>
 
                   <button
                     onClick={(e) => handleDelete(project.id, e)}
                     title="Delete Project"
-                    className="text-slate-300 hover:text-rose-600 p-1 rounded-md transition opacity-0 group-hover:opacity-100"
+                    aria-label={`Delete ${project.name}`}
+                    disabled={deletingId === project.id}
+                    className="text-slate-400 hover:text-rose-600 p-1 rounded-md transition disabled:opacity-50"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {deletingId === project.id ? "Deleting…" : <Trash2 className="w-4 h-4" />}
                   </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-1 text-2xs font-semibold ${
+                    project.status === "NEEDS_REVIEW"
+                      ? "bg-amber-50 text-amber-800 border border-amber-200"
+                      : project.status === "ACTIVE"
+                        ? "bg-indigo-50 text-indigo-800 border border-indigo-200"
+                        : "bg-slate-100 text-slate-700 border border-slate-200"
+                  }`}>
+                    {project.status === "NEEDS_REVIEW"
+                      ? "Needs review"
+                      : project.status === "ACTIVE"
+                        ? "Active"
+                        : "Setup"}
+                  </span>
+                  <span className="text-2xs text-slate-500">
+                    {project.pendingReviewCount} pending review{project.pendingReviewCount === 1 ? "" : "s"}
+                  </span>
+                  {project.id === "demo-aerotech-portal" && (
+                    <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-2xs font-semibold text-sky-800">
+                      Synthetic demo
+                    </span>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 pt-2 border-t border-slate-100">
@@ -148,13 +223,18 @@ export function ProjectList({ initialProjects }: Props) {
                 </div>
               </div>
 
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-semibold text-emerald-600 group-hover:text-emerald-700">
-                <span>View Scope Audit &rarr;</span>
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                <Link
+                  href={`/projects/${project.id}`}
+                  className="font-semibold text-indigo-700 hover:text-indigo-900 focus-visible:outline-2 focus-visible:outline-indigo-600 rounded"
+                >
+                  View Scope Audit <span aria-hidden="true">&rarr;</span>
+                </Link>
                 <span className="text-slate-400 font-normal text-2xs">
                   Budget: {formatCurrency(project.originalBudgetCents, project.currency)}
                 </span>
               </div>
-            </Link>
+            </article>
           ))}
         </div>
       )}
