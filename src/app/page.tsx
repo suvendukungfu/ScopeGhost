@@ -1,20 +1,32 @@
 import React from "react";
+import { getDb } from "@/lib/db/connection";
+import { ProjectRepository } from "@/lib/db/repositories/projects";
+import { Navbar } from "@/components/Navbar";
+import { ProjectList } from "@/components/ProjectList";
+
+export const dynamic = "force-dynamic";
 
 export default function HomePage() {
+  const db = getDb();
+  const repo = new ProjectRepository(db);
+  const projects = repo.findAll();
+
   return (
-    <main className="max-w-5xl mx-auto px-4 py-12">
-      <header className="mb-10 text-center">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 mb-4">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          Local-First &bull; Zero Cloud Leakage
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      <Navbar />
+
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <ProjectList initialProjects={projects} />
+      </main>
+
+      <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <p>ScopeGhost &bull; Local-First Project Scope Auditor &bull; Open Source</p>
+          <p className="text-slate-400">
+            Inference processed strictly locally via Ollama. No data leaves your device.
+          </p>
         </div>
-        <h1 className="text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
-          Scope<span className="text-emerald-600">Ghost</span>
-        </h1>
-        <p className="mt-3 text-lg text-slate-600 max-w-2xl mx-auto">
-          Audit client requests against your baseline agreement, verify evidence citations, calculate costs deterministically, and generate change orders.
-        </p>
-      </header>
-    </main>
+      </footer>
+    </div>
   );
 }
