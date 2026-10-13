@@ -81,12 +81,28 @@ export const ModelEvidenceCitationSchema = z.object({
   quote: z.string().min(1),
 });
 
+export const ModelClauseCitationSchema = z.preprocess((val) => {
+  if (!val || typeof val !== "object") return null;
+  const obj = val as Record<string, unknown>;
+  const clauseId = obj.clauseId ?? obj.clause_id;
+  const quote = obj.quote;
+  if (!clauseId && !quote) return null;
+  return {
+    clauseId,
+    quote,
+  };
+}, z.object({
+  clauseId: z.string().min(1),
+  quote: z.string().min(1),
+}));
+
 export const ScopeAnalysisResultSchema = z.object({
   classification: z.preprocess(
     (val) => typeof val === "string" ? val.trim().toUpperCase().replace(/[-\s]+/g, "_") : val,
     ScopeClassificationSchema
   ),
   explanation: z.string().min(1).max(2000),
+  clauseCitation: ModelClauseCitationSchema.nullable().optional().default(null),
   supportingEvidence: z.array(ModelEvidenceCitationSchema).max(20).default([]),
   contradictingEvidence: z.array(ModelEvidenceCitationSchema).max(20).default([]),
   missingInformation: z.array(z.string().min(1).max(500)).max(20).default([]),
@@ -97,7 +113,12 @@ export const ScopeAnalysisResultSchema = z.object({
   confidenceExplanation: z.string().min(1).max(500),
   estimatedHoursMin: z.coerce.number().finite().nonnegative().max(100_000).default(0),
   estimatedHoursMax: z.coerce.number().finite().nonnegative().max(100_000).default(0),
-  nextAction: z.string().min(1).max(1000),
+  nextAction: z.preprocess((val) => {
+    if (typeof val === "string" && val.trim().length > 0) {
+      return val.trim().slice(0, 1000);
+    }
+    return "Review scope and confirm next steps with client.";
+  }, z.string().min(1).max(1000)),
 }).strict().refine(
   (result) => result.estimatedHoursMax >= result.estimatedHoursMin,
   { message: "Maximum estimated hours must not be less than minimum estimated hours" }

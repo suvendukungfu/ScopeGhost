@@ -93,17 +93,22 @@ export class ScopeAnalysisOrchestrator {
           const candidateCitation =
             result.supportingEvidence[0] ??
             result.contradictingEvidence[0];
+          const verifiedClause = result.clauseCitation?.isVerified
+            ? result.clauseCitation
+            : null;
 
           findingInputs.push({
             runId: run.id,
             projectId,
             evidenceChunkId: chunk.id,
+            matchedClauseId: verifiedClause?.clauseId ?? null,
             classification: result.classification,
             title: chunk.textContent.trim().slice(0, 147) || "Client request",
             reasoning: result.explanation,
             citedRequestQuote: candidateCitation?.quote ?? chunk.textContent,
+            citedClauseQuote: verifiedClause?.quote ?? null,
             isRequestQuoteVerified: Boolean(candidateCitation),
-            isClauseQuoteVerified: false,
+            isClauseQuoteVerified: Boolean(verifiedClause),
             confidenceScore,
             estHoursMin: hours?.hoursMin ?? 0,
             estHoursMax: hours?.hoursMax ?? 0,
@@ -120,16 +125,20 @@ export class ScopeAnalysisOrchestrator {
             err instanceof ScopeAnalysisServiceError &&
             (err.category === "UNVERIFIED_CITATION" ||
               err.category === "UNKNOWN_EVIDENCE" ||
+              err.category === "UNKNOWN_CLAUSE" ||
+              err.category === "UNVERIFIED_CLAUSE_CITATION" ||
               err.category === "MALFORMED_OUTPUT")
           ) {
             findingInputs.push({
               runId: run.id,
               projectId,
               evidenceChunkId: chunk.id,
+              matchedClauseId: null,
               classification: "INSUFFICIENT_EVIDENCE",
               title: chunk.textContent.trim().slice(0, 147) || "Client request",
               reasoning: `Model analysis produced an unverified citation or malformed output: ${err.message}. Flagged for human review without accepting unverified claims.`,
               citedRequestQuote: chunk.textContent.slice(0, 300),
+              citedClauseQuote: null,
               isRequestQuoteVerified: false,
               isClauseQuoteVerified: false,
               confidenceScore: 0.2,
