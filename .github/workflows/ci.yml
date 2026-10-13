@@ -6,9 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel outdated runs when newer commits arrive on the same branch or PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# CI only needs to read repository contents.
+permissions:
+  contents: read
+
 jobs:
   test-and-build:
+    name: Typecheck, Test & Build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -18,7 +29,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "npm"
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -26,8 +37,32 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Run Unit & Integration Tests
+      - name: Run unit tests
         run: npm test
 
-      - name: Build Production Application
+      - name: Build production application
         run: npm run build
+
+  e2e:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: npm run test:e2e
