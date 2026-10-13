@@ -190,7 +190,7 @@ function validateCitations(
 function validateClauseCitation(
   citation: z.infer<typeof ModelClauseCitationSchema> | null | undefined,
   scopeItems: ScopeAnalysisInput["scopeItems"]
-): VerifiedClauseCitation | null {
+): (VerifiedClauseCitation & { kind: ScopeAnalysisInput["scopeItems"][0]["kind"] }) | null {
   if (!citation) return null;
 
   const matchedClause = scopeItems.find((item) => item.id === citation.clauseId);
@@ -212,6 +212,7 @@ function validateClauseCitation(
   return {
     clauseId: citation.clauseId,
     quote: citation.quote,
+    kind: matchedClause.kind,
     isVerified: true,
   };
 }
@@ -282,19 +283,31 @@ export class ScopeAnalysisService {
       let confidenceExplanation = result.confidenceExplanation;
       const missingInformation = [...result.missingInformation];
 
-      // If no verified clause supports an out-of-scope conclusion, return an uncertain finding
-      if (classification === "POTENTIALLY_OUT_OF_SCOPE" && !verifiedClauseCitation) {
+      // If no verified exclusion clause supports an out-of-scope conclusion, return an uncertain finding
+      const isExclusionSupported =
+        verifiedClauseCitation &&
+        (verifiedClauseCitation.kind === "EXCLUSION" ||
+          verifiedClauseCitation.kind === "REVISION_LIMIT");
+
+      if (classification === "POTENTIALLY_OUT_OF_SCOPE" && !isExclusionSupported) {
         classification = "AMBIGUOUS";
         confidence = "LOW";
-        confidenceExplanation = "Low confidence: No baseline contract clause was verified to support excluding this request.";
-        explanation = `${result.explanation} (Note: No baseline contract clause was verified to support an exclusion; classified as uncertain pending contractual clarification.)`;
+        confidenceExplanation =
+          "Low confidence: No baseline exclusion clause was verified to support contractually excluding this request.";
+        explanation = `${result.explanation} (Note: No baseline contract clause explicitly excludes this request; classified as uncertain pending contractual clarification.)`;
         missingInformation.push("Specific contract clause supporting scope exclusion");
       }
 
       const analysis: ScopeAnalysisResult = {
         classification,
         explanation,
-        clauseCitation: verifiedClauseCitation,
+        clauseCitation: verifiedClauseCitation
+          ? {
+              clauseId: verifiedClauseCitation.clauseId,
+              quote: verifiedClauseCitation.quote,
+              isVerified: true,
+            }
+          : null,
         supportingEvidenceIds: result.supportingEvidence.map((citation) => citation.evidenceId),
         supportingEvidence: result.supportingEvidence,
         contradictingEvidenceIds: result.contradictingEvidence.map((citation) => citation.evidenceId),

@@ -177,6 +177,59 @@ describe("Local scope analysis service", () => {
     );
   });
 
+  it("downgrades out-of-scope finding to uncertain when cited clause is only a DELIVERABLE", async () => {
+    const deliverableClauseModel = createModel(modelResponse({
+      classification: "POTENTIALLY_OUT_OF_SCOPE",
+      clauseCitation: {
+        clauseId: "scope-web",
+        quote: "Responsive storefront with a standard product catalog.",
+      },
+      explanation: "Request is not mentioned in the storefront deliverable.",
+    }));
+    const service = new ScopeAnalysisService(deliverableClauseModel.model, vi.fn());
+    const result = await service.analyze(input);
+
+    // Citing a DELIVERABLE cannot establish a contractual exclusion;
+    // must be downgraded to AMBIGUOUS with LOW confidence.
+    expect(result.classification).toBe("AMBIGUOUS");
+    expect(result.confidence).toBe("LOW");
+    expect(result.missingInformation).toContain(
+      "Specific contract clause supporting scope exclusion"
+    );
+  });
+
+  it("allows POTENTIALLY_OUT_OF_SCOPE when citing a verified REVISION_LIMIT clause", async () => {
+    const revisionInput: ScopeAnalysisInput = {
+      ...input,
+      scopeItems: [
+        ...input.scopeItems,
+        {
+          id: "scope-rev-limit",
+          kind: "REVISION_LIMIT",
+          title: "Revision round limit",
+          content: "Contract includes up to 2 revision rounds for design deliverables.",
+        },
+      ],
+    };
+    const revisionLimitModel = createModel(modelResponse({
+      classification: "POTENTIALLY_OUT_OF_SCOPE",
+      clauseCitation: {
+        clauseId: "scope-rev-limit",
+        quote: "Contract includes up to 2 revision rounds for design deliverables.",
+      },
+      explanation: "Client is requesting a 4th round of design revisions.",
+    }));
+    const service = new ScopeAnalysisService(revisionLimitModel.model, vi.fn());
+    const result = await service.analyze(revisionInput);
+
+    expect(result.classification).toBe("POTENTIALLY_OUT_OF_SCOPE");
+    expect(result.clauseCitation).toEqual({
+      clauseId: "scope-rev-limit",
+      quote: "Contract includes up to 2 revision rounds for design deliverables.",
+      isVerified: true,
+    });
+  });
+
   it("retains both supporting and contradicting citations when scope clauses conflict", async () => {
     const conflictingInput: ScopeAnalysisInput = {
       ...input,
