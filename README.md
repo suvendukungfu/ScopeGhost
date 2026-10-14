@@ -141,16 +141,22 @@ ScopeGhost includes a pre-packaged synthetic demonstration project (**"AeroTech 
 ## Testing & CI
 
 ```bash
-# Run unit & integration tests (Vitest)
+# Run unit tests (Vitest - 101 passed, 4 opt-in skipped)
 npm test
 
-# Run TypeScript type check
+# Run deterministic mock-completion evaluation benchmark CLI (36 synthetic cases)
+npm run test:eval
+
+# Run live local Ollama integration tests with Gemma 3 (4 live tests)
+npm run test:integration
+
+# Run TypeScript strict type check
 npm run typecheck
 
-# Build production bundle
+# Build production bundle (Next.js 16 Turbopack)
 npm run build
 
-# Run Playwright E2E tests (requires running server or uses webServer config)
+# Run Playwright browser E2E tests
 npm run test:e2e
 ```
 
