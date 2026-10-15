@@ -17,9 +17,12 @@ import {
   Terminal,
   ShieldCheck,
   AlertTriangle,
+  Layers,
+  BarChart3,
 } from "lucide-react";
 import type {
   AgentEvent,
+  HourlyTelemetryBucket,
   McpExecutionEvidence,
   TigerTelemetryResponse,
 } from "@/lib/tiger/types";
@@ -64,7 +67,7 @@ export function TigerTelemetryDashboard({ initialData }: Props) {
   };
 
   const isLive = data.source === "LIVE_DATABASE";
-  const { summary, agentAggregates, recentEvents, connectionInfo, historicalMcpEvidence = [] } = data;
+  const { summary, agentAggregates, recentEvents, connectionInfo, historicalMcpEvidence = [], hourlyRollup = [] } = data;
 
   const filteredEvents = recentEvents.filter((event: AgentEvent) => {
     if (statusFilter === "ALL") return true;
@@ -445,6 +448,214 @@ export function TigerTelemetryDashboard({ initialData }: Props) {
           </div>
         ) : (
           <p className="text-xs text-slate-500 py-2">No event records available for latency comparison.</p>
+        )}
+      </section>
+
+      {/* Hourly Continuous Aggregate Section (TimescaleDB CAGG) */}
+      <section
+        aria-label="Hourly Continuous Aggregate Rollup"
+        className="rounded-xl border border-slate-200 bg-white p-5 shadow-2xs space-y-4"
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-lg bg-indigo-50 text-indigo-700 shrink-0">
+              <Layers className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-slate-900">
+                  Hourly Telemetry Continuous Aggregate
+                </h2>
+                <span className="hidden sm:inline-block rounded bg-indigo-50 px-1.5 py-0.5 text-2xs font-mono font-medium text-indigo-700 border border-indigo-100">
+                  agent_telemetry_hourly
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                TimescaleDB continuous aggregate materialized by <code className="font-mono text-indigo-700">time_bucket(&apos;1 hour&apos;, created_at)</code>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-2xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+              <Clock className="w-3 h-3 text-slate-500" />
+              <span>Window: 48h limit</span>
+            </span>
+            {hourlyRollup.some((b) => b.source === "LIVE_CAGG") ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-2xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                <span>TimescaleDB Live View</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-2xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                <Info className="w-3 h-3 text-amber-600" />
+                <span>Snapshot Fallback</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Visual Bar Cards or Table */}
+        {hourlyRollup.length > 0 ? (
+          <div className="space-y-4">
+            {/* Visual throughput cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {hourlyRollup.map((bucket: HourlyTelemetryBucket, idx: number) => {
+                const bucketTotal = bucket.totalActions;
+                const bucketSuccessPct = bucketTotal > 0 ? Math.round((bucket.successCount / bucketTotal) * 100) : 0;
+                const bucketFailPct = 100 - bucketSuccessPct;
+                const formattedTime = formatUtcTime(bucket.bucket);
+                const isLiveCagg = bucket.source === "LIVE_CAGG";
+
+                return (
+                  <div
+                    key={`${bucket.bucket}-${bucket.agentName}-${idx}`}
+                    className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 space-y-2.5 hover:border-indigo-200 transition text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-mono text-2xs text-slate-600">
+                        <Clock className="w-3 h-3 text-slate-400" />
+                        <span className="font-semibold text-slate-800">{formattedTime}</span>
+                      </div>
+                      <span className="font-mono text-2xs px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium">
+                        {bucket.agentName}
+                      </span>
+                    </div>
+
+                    {/* Action Counts & Success Rate */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-2xs">
+                        <span className="text-slate-500 font-medium">
+                          Throughput: <strong className="text-slate-900">{bucket.totalActions} actions</strong>
+                        </span>
+                        <span className="text-slate-600 font-mono">
+                          {bucket.successCount} ok / {bucket.failureCount} fail ({bucketSuccessPct}%)
+                        </span>
+                      </div>
+                      {/* Mini Progress Bar */}
+                      <div
+                        role="progressbar"
+                        aria-label={`Bucket ${formattedTime} Success Rate`}
+                        aria-valuenow={bucketSuccessPct}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        className="h-2 w-full bg-slate-200 rounded-full overflow-hidden flex"
+                      >
+                        <div
+                          style={{ width: `${bucketSuccessPct}%` }}
+                          className="bg-emerald-500 h-full transition-all duration-300"
+                        />
+                        <div
+                          style={{ width: `${bucketFailPct}%` }}
+                          className="bg-rose-500 h-full transition-all duration-300"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Latency and Tokens metrics */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-200/60 text-2xs">
+                      <div>
+                        <span className="text-slate-400 block">Avg / Max Latency</span>
+                        <span className="font-mono font-medium text-slate-700">
+                          {bucket.avgDurationMs !== null ? `${bucket.avgDurationMs}ms` : "—"} /{" "}
+                          {bucket.maxDurationMs !== null ? `${bucket.maxDurationMs}ms` : "—"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block">Total / Avg Tokens</span>
+                        <span className="font-mono font-medium text-slate-700">
+                          {bucket.totalTokens} / {bucket.avgTokens !== null ? bucket.avgTokens : "—"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Origin Tag */}
+                    <div className="flex items-center justify-between pt-1 text-3xs text-slate-400">
+                      <span>Source: {isLiveCagg ? "TimescaleDB CAGG" : "Snapshot Fallback"}</span>
+                      <span className="font-mono">{bucket.bucket.substring(0, 10)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Accessible Tabular Alternative */}
+            <div className="pt-2">
+              <details className="group text-xs text-slate-600">
+                <summary className="cursor-pointer font-medium text-slate-700 hover:text-indigo-600 inline-flex items-center gap-1 focus-visible:outline-2 focus-visible:outline-indigo-600 rounded">
+                  <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>View Full Hourly Aggregate Data Table ({hourlyRollup.length} buckets)</span>
+                </summary>
+                <div className="mt-2 overflow-x-auto rounded-lg border border-slate-200">
+                  <table
+                    aria-label="Hourly Continuous Aggregate Data Table"
+                    className="w-full text-left text-2xs"
+                  >
+                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                      <tr>
+                        <th className="py-2 px-3">Hour Bucket (UTC)</th>
+                        <th className="py-2 px-3">Agent</th>
+                        <th className="py-2 px-3">Actions</th>
+                        <th className="py-2 px-3">Pass / Fail</th>
+                        <th className="py-2 px-3">Avg Latency</th>
+                        <th className="py-2 px-3">Max Latency</th>
+                        <th className="py-2 px-3">Total Tokens</th>
+                        <th className="py-2 px-3">Avg Tokens</th>
+                        <th className="py-2 px-3">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      {hourlyRollup.map((bucket: HourlyTelemetryBucket, idx: number) => (
+                        <tr key={idx} className="hover:bg-slate-50/60">
+                          <td className="py-2 px-3 font-mono text-slate-600 whitespace-nowrap">
+                            {bucket.bucket}
+                          </td>
+                          <td className="py-2 px-3 font-medium text-slate-900">
+                            {bucket.agentName}
+                          </td>
+                          <td className="py-2 px-3 font-semibold">{bucket.totalActions}</td>
+                          <td className="py-2 px-3">
+                            <span className="text-emerald-700">{bucket.successCount}</span> /{" "}
+                            <span className={bucket.failureCount > 0 ? "text-rose-700" : "text-slate-400"}>
+                              {bucket.failureCount}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 font-mono">
+                            {bucket.avgDurationMs !== null ? `${bucket.avgDurationMs} ms` : "—"}
+                          </td>
+                          <td className="py-2 px-3 font-mono">
+                            {bucket.maxDurationMs !== null ? `${bucket.maxDurationMs} ms` : "—"}
+                          </td>
+                          <td className="py-2 px-3 font-mono">{bucket.totalTokens}</td>
+                          <td className="py-2 px-3 font-mono">
+                            {bucket.avgTokens !== null ? bucket.avgTokens : "—"}
+                          </td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-3xs font-medium ${
+                                bucket.source === "LIVE_CAGG"
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-amber-50 text-amber-700"
+                              }`}
+                            >
+                              {bucket.source || "SNAPSHOT"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-6 text-xs text-slate-500 bg-slate-50/50 rounded-lg border border-dashed border-slate-200">
+            <p className="font-medium text-slate-600">No hourly aggregate records found.</p>
+            <p className="text-2xs text-slate-400 mt-1">
+              Continuous aggregate view <code className="font-mono">agent_telemetry_hourly</code> returned zero buckets for the query window.
+            </p>
+          </div>
         )}
       </section>
 

@@ -55,6 +55,19 @@ export interface McpExecutionEvidence {
   serviceId?: string;
 }
 
+export interface HourlyTelemetryBucket {
+  bucket: string;
+  agentName: string;
+  totalActions: number;
+  successCount: number;
+  failureCount: number;
+  avgDurationMs: number | null;
+  maxDurationMs: number | null;
+  totalTokens: number;
+  avgTokens: number | null;
+  source?: "LIVE_CAGG" | "SYNTHETIC_FALLBACK";
+}
+
 export interface TigerTelemetryResponse {
   source: TigerDataSource;
   serviceId?: string;
@@ -64,4 +77,5 @@ export interface TigerTelemetryResponse {
   recentEvents: AgentEvent[];
   connectionInfo: TigerConnectionInfo;
   historicalMcpEvidence: McpExecutionEvidence[];
+  hourlyRollup: HourlyTelemetryBucket[];
 }

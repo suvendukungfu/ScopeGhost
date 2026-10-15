@@ -1,8 +1,12 @@
 import { Pool } from "pg";
-import { computeAggregates } from "./aggregates";
-import { AgentEventSchema, TigerTelemetryResponseSchema } from "./schemas";
+import { computeAggregates, computeHourlyRollup } from "./aggregates";
+import {
+  AgentEventSchema,
+  HourlyTelemetryBucketSchema,
+  TigerTelemetryResponseSchema,
+} from "./schemas";
 import { getVerifiedSnapshot, HISTORICAL_MCP_EVIDENCE } from "./snapshot";
-import type { AgentEvent, TigerTelemetryResponse } from "./types";
+import type { AgentEvent, HourlyTelemetryBucket, TigerTelemetryResponse } from "./types";
 
 let cachedPool: Pool | null = null;
 
@@ -40,6 +44,7 @@ export async function getTigerTelemetry(): Promise<TigerTelemetryResponse> {
     // Explicit read-only transaction and query
     const client = await pool.connect();
     let rows: unknown[] = [];
+    let hourlyRows: unknown[] = [];
     try {
       await client.query("SET TRANSACTION READ ONLY;");
       const res = await client.query(`
@@ -58,6 +63,34 @@ export async function getTigerTelemetry(): Promise<TigerTelemetryResponse> {
         LIMIT 50;
       `);
       rows = res.rows;
+
+      // Query hourly continuous aggregate with parameterized lookback limit
+      try {
+        const caggRes = await client.query(
+          `
+          SELECT
+            bucket,
+            agent_name,
+            total_actions,
+            success_count,
+            failure_count,
+            avg_duration_ms,
+            max_duration_ms,
+            total_tokens,
+            avg_tokens
+          FROM agent_telemetry_hourly
+          ORDER BY bucket DESC, agent_name ASC
+          LIMIT $1;
+        `,
+          [48]
+        );
+        hourlyRows = caggRes.rows;
+      } catch (caggErr) {
+        console.warn(
+          "[TigerTelemetry] Continuous aggregate view query fallback:",
+          caggErr instanceof Error ? caggErr.message : String(caggErr)
+        );
+      }
     } finally {
       client.release();
     }
@@ -110,6 +143,44 @@ export async function getTigerTelemetry(): Promise<TigerTelemetryResponse> {
 
     const { summary, agentAggregates } = computeAggregates(validatedEvents);
 
+    const validatedHourly: HourlyTelemetryBucket[] = [];
+    for (const hr of hourlyRows) {
+      const rawH = hr as Record<string, unknown>;
+      const parsedH = HourlyTelemetryBucketSchema.safeParse({
+        bucket:
+          rawH.bucket instanceof Date
+            ? rawH.bucket.toISOString()
+            : String(rawH.bucket),
+        agentName: String(rawH.agent_name),
+        totalActions: Number(rawH.total_actions ?? 0),
+        successCount: Number(rawH.success_count ?? 0),
+        failureCount: Number(rawH.failure_count ?? 0),
+        avgDurationMs:
+          rawH.avg_duration_ms !== null && rawH.avg_duration_ms !== undefined
+            ? Number(rawH.avg_duration_ms)
+            : null,
+        maxDurationMs:
+          rawH.max_duration_ms !== null && rawH.max_duration_ms !== undefined
+            ? Number(rawH.max_duration_ms)
+            : null,
+        totalTokens: Number(rawH.total_tokens ?? 0),
+        avgTokens:
+          rawH.avg_tokens !== null && rawH.avg_tokens !== undefined
+            ? Number(rawH.avg_tokens)
+            : null,
+        source: "LIVE_CAGG",
+      });
+
+      if (parsedH.success) {
+        validatedHourly.push(parsedH.data);
+      }
+    }
+
+    const hourlyRollup =
+      validatedHourly.length > 0
+        ? validatedHourly
+        : computeHourlyRollup(validatedEvents);
+
     const response: TigerTelemetryResponse = {
       source: "LIVE_DATABASE",
       serviceId: process.env.TIGER_SERVICE_ID || "ysa2cqiz8e",
@@ -123,6 +194,7 @@ export async function getTigerTelemetry(): Promise<TigerTelemetryResponse> {
         message: "Successfully connected to live Tiger Cloud PostgreSQL database.",
       },
       historicalMcpEvidence: HISTORICAL_MCP_EVIDENCE,
+      hourlyRollup,
     };
 
     return TigerTelemetryResponseSchema.parse(response);

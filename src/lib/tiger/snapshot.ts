@@ -1,4 +1,4 @@
-import { computeAggregates } from "./aggregates";
+import { computeAggregates, computeHourlyRollup } from "./aggregates";
 import type { AgentEvent, McpExecutionEvidence, TigerTelemetryResponse } from "./types";
 
 /**
@@ -125,6 +125,7 @@ export const HISTORICAL_MCP_EVIDENCE: McpExecutionEvidence[] = [
 
 export function getVerifiedSnapshot(connectionMessage?: string): TigerTelemetryResponse {
   const { summary, agentAggregates } = computeAggregates(VERIFIED_SYNTHETIC_EVENTS);
+  const hourlyRollup = computeHourlyRollup(VERIFIED_SYNTHETIC_EVENTS);
 
   return {
     source: "VERIFIED_SNAPSHOT",
@@ -141,5 +142,6 @@ export function getVerifiedSnapshot(connectionMessage?: string): TigerTelemetryR
         "Live Tiger Cloud PostgreSQL connectivity is unconfigured (TIGER_DATABASE_URL not set). Showing verified synthetic snapshot from service ysa2cqiz8e.",
     },
     historicalMcpEvidence: HISTORICAL_MCP_EVIDENCE,
+    hourlyRollup,
   };
 }

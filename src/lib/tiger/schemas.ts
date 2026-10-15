@@ -60,6 +60,19 @@ export const McpExecutionEvidenceSchema = z.object({
   serviceId: z.string().optional(),
 });
 
+export const HourlyTelemetryBucketSchema = z.object({
+  bucket: z.string().min(1),
+  agentName: z.string().min(1).max(64),
+  totalActions: z.number().int().nonnegative(),
+  successCount: z.number().int().nonnegative(),
+  failureCount: z.number().int().nonnegative(),
+  avgDurationMs: z.number().nonnegative().nullable(),
+  maxDurationMs: z.number().int().nonnegative().nullable(),
+  totalTokens: z.number().int().nonnegative(),
+  avgTokens: z.number().nonnegative().nullable(),
+  source: z.enum(["LIVE_CAGG", "SYNTHETIC_FALLBACK"]).optional(),
+});
+
 export const TigerTelemetryResponseSchema = z.object({
   source: z.enum(["LIVE_DATABASE", "VERIFIED_SNAPSHOT"]),
   serviceId: z.string().optional(),
@@ -69,4 +82,5 @@ export const TigerTelemetryResponseSchema = z.object({
   recentEvents: z.array(AgentEventSchema),
   connectionInfo: TigerConnectionInfoSchema,
   historicalMcpEvidence: z.array(McpExecutionEvidenceSchema).default([]),
+  hourlyRollup: z.array(HourlyTelemetryBucketSchema).default([]),
 });

@@ -39,6 +39,10 @@ test.describe("ScopeGhost Full QA & Business Workflow Suite", () => {
     await refreshBtn.click();
     await expect(page.getByText(/Recent Telemetry Activity/i)).toBeVisible();
 
+    // Verify TimescaleDB continuous aggregate section
+    await expect(page.getByRole("heading", { name: "Hourly Telemetry Continuous Aggregate" })).toBeVisible();
+    await expect(page.getByText("agent_telemetry_hourly")).toBeVisible();
+
     // -------------------------------------------------------------
     // 3. Settings & Health Panel (/settings)
     // -------------------------------------------------------------

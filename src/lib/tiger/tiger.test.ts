@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeAggregates } from "./aggregates";
+import { computeAggregates, computeHourlyRollup } from "./aggregates";
 import { getTigerTelemetry } from "./client";
 import {
   AgentEventSchema,
   AgentEventStatusSchema,
+  HourlyTelemetryBucketSchema,
   McpExecutionEvidenceSchema,
   TelemetrySummarySchema,
   TigerTelemetryResponseSchema,
@@ -13,7 +14,7 @@ import {
   HISTORICAL_MCP_EVIDENCE,
   VERIFIED_SYNTHETIC_EVENTS,
 } from "./snapshot";
-import type { AgentEvent, McpExecutionEvidence } from "./types";
+import type { AgentEvent, HourlyTelemetryBucket, McpExecutionEvidence } from "./types";
 
 describe("Tiger Telemetry Schemas & Validation", () => {
   it("validates permissible event statuses", () => {
@@ -189,3 +190,114 @@ describe("Verified Snapshot & Fallback Behavior", () => {
     }
   });
 });
+
+describe("TimescaleDB Continuous Aggregate (Hourly Rollup)", () => {
+  it("validates a well-formed continuous aggregate row from live database", () => {
+    const liveCaggRow: HourlyTelemetryBucket = {
+      bucket: "2026-10-13T10:00:00.000Z",
+      agentName: "scopeghost-core",
+      totalActions: 14,
+      successCount: 13,
+      failureCount: 1,
+      avgDurationMs: 1420.5,
+      maxDurationMs: 2850,
+      totalTokens: 4200,
+      avgTokens: 300.0,
+      source: "LIVE_CAGG",
+    };
+
+    const parsed = HourlyTelemetryBucketSchema.parse(liveCaggRow);
+    expect(parsed.bucket).toBe("2026-10-13T10:00:00.000Z");
+    expect(parsed.agentName).toBe("scopeghost-core");
+    expect(parsed.totalActions).toBe(14);
+    expect(parsed.successCount).toBe(13);
+    expect(parsed.failureCount).toBe(1);
+    expect(parsed.avgDurationMs).toBe(1420.5);
+    expect(parsed.maxDurationMs).toBe(2850);
+    expect(parsed.totalTokens).toBe(4200);
+    expect(parsed.avgTokens).toBe(300.0);
+    expect(parsed.source).toBe("LIVE_CAGG");
+  });
+
+  it("handles null average and maximum metrics gracefully", () => {
+    const nullMetricRow = {
+      bucket: "2026-10-13T11:00:00.000Z",
+      agentName: "financial-auditor",
+      totalActions: 2,
+      successCount: 2,
+      failureCount: 0,
+      avgDurationMs: null,
+      maxDurationMs: null,
+      totalTokens: 0,
+      avgTokens: null,
+      source: "SYNTHETIC_FALLBACK",
+    };
+
+    const parsed = HourlyTelemetryBucketSchema.parse(nullMetricRow);
+    expect(parsed.avgDurationMs).toBeNull();
+    expect(parsed.maxDurationMs).toBeNull();
+    expect(parsed.avgTokens).toBeNull();
+    expect(parsed.source).toBe("SYNTHETIC_FALLBACK");
+  });
+
+  it("rejects invalid negative metrics in aggregate rows", () => {
+    expect(() =>
+      HourlyTelemetryBucketSchema.parse({
+        bucket: "2026-10-13T11:00:00.000Z",
+        agentName: "bad-agent",
+        totalActions: -1,
+        successCount: 0,
+        failureCount: 0,
+        avgDurationMs: null,
+        maxDurationMs: null,
+        totalTokens: 0,
+        avgTokens: null,
+      })
+    ).toThrow();
+  });
+
+  it("computes accurate hourly buckets and metrics using computeHourlyRollup", () => {
+    const rollup = computeHourlyRollup(VERIFIED_SYNTHETIC_EVENTS);
+
+    // Verified events span 10:00 UTC and 11:00 UTC across 3 agents
+    expect(rollup.length).toBeGreaterThanOrEqual(3);
+
+    // Verify all buckets have valid ISO strings ending in 00:00.000Z
+    for (const b of rollup) {
+      expect(b.bucket).toMatch(/T\d\d:00:00\.000Z$/);
+      expect(b.totalActions).toBeGreaterThanOrEqual(1);
+      expect(b.totalActions).toBe(b.successCount + b.failureCount);
+      expect(b.source).toBe("SYNTHETIC_FALLBACK");
+    }
+
+    // Verify ordering: descending by bucket, ascending by agentName
+    for (let i = 1; i < rollup.length; i++) {
+      const prev = rollup[i - 1];
+      const curr = rollup[i];
+      if (prev.bucket === curr.bucket) {
+        expect(prev.agentName.localeCompare(curr.agentName)).toBeLessThanOrEqual(0);
+      } else {
+        expect(prev.bucket.localeCompare(curr.bucket)).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("handles empty event lists in computeHourlyRollup without error", () => {
+    const emptyRollup = computeHourlyRollup([]);
+    expect(emptyRollup).toEqual([]);
+  });
+
+  it("verifies snapshot includes populated hourly rollup with explicit fallback source", () => {
+    const snapshot = getVerifiedSnapshot();
+    expect(snapshot.hourlyRollup).toBeDefined();
+    expect(snapshot.hourlyRollup.length).toBeGreaterThan(0);
+
+    for (const bucket of snapshot.hourlyRollup) {
+      expect(bucket.source).toBe("SYNTHETIC_FALLBACK");
+    }
+
+    expect(snapshot.source).toBe("VERIFIED_SNAPSHOT");
+    expect(snapshot.connectionInfo.connected).toBe(false);
+  });
+});
+

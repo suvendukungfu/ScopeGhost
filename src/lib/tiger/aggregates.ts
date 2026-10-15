@@ -1,4 +1,4 @@
-import type { AgentAggregate, AgentEvent, TelemetrySummary } from "./types";
+import type { AgentAggregate, AgentEvent, HourlyTelemetryBucket, TelemetrySummary } from "./types";
 
 export function computeAggregates(events: AgentEvent[]): {
   summary: TelemetrySummary;
@@ -96,4 +96,94 @@ export function computeAggregates(events: AgentEvent[]): {
   };
 
   return { summary, agentAggregates };
+}
+
+/**
+ * Computes deterministic hourly telemetry buckets from an array of AgentEvents.
+ * Serves as an exact algorithmic reference for TimescaleDB time_bucket('1 hour', created_at)
+ * and provides verified fallback when the live CAGG is empty or during offline testing.
+ */
+export function computeHourlyRollup(events: AgentEvent[]): HourlyTelemetryBucket[] {
+  const bucketMap = new Map<
+    string,
+    {
+      bucket: string;
+      agentName: string;
+      totalActions: number;
+      successCount: number;
+      failureCount: number;
+      totalDurationMs: number;
+      durationCount: number;
+      maxDurationMs: number | null;
+      totalTokens: number;
+      tokensCount: number;
+    }
+  >();
+
+  for (const event of events) {
+    const d = new Date(event.createdAt);
+    if (isNaN(d.getTime())) continue;
+
+    d.setUTCMinutes(0, 0, 0);
+    const bucketIso = d.toISOString();
+    const key = `${bucketIso}::${event.agentName}`;
+
+    const existing = bucketMap.get(key) || {
+      bucket: bucketIso,
+      agentName: event.agentName,
+      totalActions: 0,
+      successCount: 0,
+      failureCount: 0,
+      totalDurationMs: 0,
+      durationCount: 0,
+      maxDurationMs: null,
+      totalTokens: 0,
+      tokensCount: 0,
+    };
+
+    existing.totalActions++;
+    if (event.status === "SUCCESS") existing.successCount++;
+    if (event.status === "FAILED") existing.failureCount++;
+
+    if (typeof event.durationMs === "number" && event.durationMs >= 0) {
+      existing.totalDurationMs += event.durationMs;
+      existing.durationCount++;
+      existing.maxDurationMs =
+        existing.maxDurationMs === null
+          ? event.durationMs
+          : Math.max(existing.maxDurationMs, event.durationMs);
+    }
+
+    if (typeof event.tokensUsed === "number" && event.tokensUsed >= 0) {
+      existing.totalTokens += event.tokensUsed;
+      existing.tokensCount++;
+    }
+
+    bucketMap.set(key, existing);
+  }
+
+  return Array.from(bucketMap.values())
+    .map((b) => ({
+      bucket: b.bucket,
+      agentName: b.agentName,
+      totalActions: b.totalActions,
+      successCount: b.successCount,
+      failureCount: b.failureCount,
+      avgDurationMs:
+        b.durationCount > 0
+          ? Math.round((b.totalDurationMs / b.durationCount) * 10) / 10
+          : null,
+      maxDurationMs: b.maxDurationMs,
+      totalTokens: b.totalTokens,
+      avgTokens:
+        b.tokensCount > 0
+          ? Math.round((b.totalTokens / b.tokensCount) * 10) / 10
+          : null,
+      source: "SYNTHETIC_FALLBACK" as const,
+    }))
+    .sort((a, b) => {
+      const cmp = b.bucket.localeCompare(a.bucket);
+      if (cmp !== 0) return cmp;
+      return a.agentName.localeCompare(b.agentName);
+    });
 }
