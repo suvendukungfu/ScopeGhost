@@ -1,4 +1,5 @@
 # ScopeGhost — MLH GitHub Copilot Challenge Submission Package
+
 **Challenge:** Use GitHub Copilot to complete any of this week's challenges  
 **Challenge ID:** `01a11b48-8554-f273-f6e4-2ace7ad19a36`  
 **Submission Portal:** [https://www.mlh.com/challenges/01a11b48-8554-f273-f6e4-2ace7ad19a36/submissions/new](https://www.mlh.com/challenges/01a11b48-8554-f273-f6e4-2ace7ad19a36/submissions/new)  
@@ -9,19 +10,22 @@
 ## Part 1: Submission Form Fields (Copy-Paste)
 
 ### Project Name
+
 ScopeGhost — Local-First AI Scope-Creep Detection & Change-Order Drafting
 
 ### GitHub Repository URL
+
 `https://github.com/suvendukungfu/ScopeGhost`
 
 ### Technologies Used (Built With)
+
 `Next.js 16 (Turbopack), React 19, TypeScript, Tailwind CSS v4, native node:sqlite, Ollama (Google Gemma 3), Zod, Vitest, Playwright, Tiger Cloud (TimescaleDB), GitHub Copilot`
 
 ---
 
 ### Project Description (Markdown)
 
-```markdown
+````markdown
 ### What ScopeGhost Does
 
 ScopeGhost is a local-first, privacy-respecting AI assistant engineered for independent software engineers, consultants, and boutique agencies. It solves one of the most costly leaks in freelance business: **unbilled scope creep**.
@@ -66,7 +70,7 @@ npm run dev
 ```
 
 Open `http://localhost:3000` and click **"Load Synthetic Demo"** to explore the complete end-to-end audit with pre-seeded contracts, communication threads, and change orders!
-```
+````
 
 ---
 
@@ -87,7 +91,7 @@ When submitting on the MLH portal or sharing in discussions, capture the followi
 
 *Post this draft in your GitHub Discussion once enabled:*
 
-```markdown
+````markdown
 ### 👻 ScopeGhost — Local-First AI Scope-Creep Detection & Change-Order Generator
 
 Hey everyone! 👋
@@ -100,6 +104,7 @@ For this week's **MLH Global Hack Week: Hacktoberfest**, I built **ScopeGhost**�
 ---
 
 #### 💡 The Problem
+
 In freelance client work, clients constantly ask for "quick favors" across email, Slack, and calls:
 - *"Can you add dynamic cryptocurrency checkout?"*
 - *"We need a native iOS app alongside the web portal!"*
@@ -110,6 +115,7 @@ Before long, freelancers absorb dozens of unbilled hours because finding contrac
 ---
 
 #### 🛠️ How ScopeGhost Solves It
+
 1. **Local-First Privacy:** Runs 100% locally on your laptop using Google Gemma 3 (`gemma3:4b` via Ollama) and native `node:sqlite`. Zero client contracts or communication text ever touches external servers.
 2. **Citation Verification Engine:** Quotes are programmatically verified against raw source text with normalized fuzzy matching. Hallucinated quotes are strictly rejected.
 3. **Deterministic Financial Math:** The AI never computes dollar totals. All pricing calculations use strict integer arithmetic in `cents` ($H \times \text{Rate}$) in TypeScript.
@@ -119,6 +125,7 @@ Before long, freelancers absorb dozens of unbilled hours because finding contrac
 ---
 
 #### 🧪 Testing & Rigor
+
 - **101 unit tests passed** across 10 test files (Vitest).
 - **36 synthetic benchmark cases** evaluated with 97.2% accuracy and 100% citation grounding.
 - **4 live Ollama integration tests** passed against local `gemma3:4b`.
@@ -131,7 +138,7 @@ Check out our documentation in the repo:
 - [`docs/MLH_COPILOT_CHALLENGE_QA.md`](https://github.com/suvendukungfu/ScopeGhost/blob/main/docs/MLH_COPILOT_CHALLENGE_QA.md)
 
 Happy Hacktoberfest! 🍂🍁
-```
+````
 
 ---
 

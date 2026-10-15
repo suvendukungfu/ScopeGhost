@@ -1,4 +1,5 @@
 # ScopeGhost — Quality Assurance & Test Verification Report
+
 **MLH Global Hack Week: Hacktoberfest — GitHub Copilot Challenge**  
 **Repository:** [https://github.com/suvendukungfu/ScopeGhost](https://github.com/suvendukungfu/ScopeGhost)  
 **Verification Date:** October 14, 2026
@@ -21,16 +22,20 @@
 ## 2. Detailed Test Execution & Verifications
 
 ### 2.1 Strict TypeScript Compilation
+
 ```bash
 npm run typecheck
 ```
+
 - **Exit Code:** 0
 - **Output:** Clean pass. Strict null checks, parameter types, Zod inference schemas, and component props all conform to TypeScript 7 without bypasses (`any`).
 
 ### 2.2 Unit & Invariant Testing (Vitest)
+
 ```bash
 npm test
 ```
+
 - **Files Tested:**
   - `src/lib/financial/financial.test.ts` (9 tests) — Integer-cent rounding, zero floating-point drift, currency formatting.
   - `src/lib/types/schemas.test.ts` (12 tests) — Zod schema validation on project, clause, chunk, and finding models.
@@ -46,9 +51,11 @@ npm test
 - **Total:** 101 passed, 4 skipped.
 
 ### 2.3 Synthetic Evaluation Benchmark (M4.9 Harness)
+
 ```bash
 npm run test:eval
 ```
+
 - **Corpus:** Version 2.0.0-synthetic (36 versioned test cases across 10 baseline contract clauses).
 - **Grounding Rate:** 100.0% (34/34 positive excerpts verified).
 - **Negative Control:** Fabricated citation rejected with `matchType: NOT_FOUND`.
@@ -60,9 +67,11 @@ npm run test:eval
   - Topic-Mismatch Downgrade: 100.0% (6/6 applied)
 
 ### 2.4 Live Ollama Integration Test Suite
+
 ```bash
 RUN_OLLAMA_INTEGRATION=1 npm run test:integration
 ```
+
 - **Prerequisites:** Local Ollama running on `http://127.0.0.1:11434` with model `gemma3:4b`.
 - **Verified Tests:**
   1. Executes real local inference and verifies clause citations against baseline scope (40.0s).
@@ -71,15 +80,18 @@ RUN_OLLAMA_INTEGRATION=1 npm run test:integration
   4. Defends against prompt injection in evidence without accepting fabricated clauses (30.4s).
 
 ### 2.5 Playwright Browser E2E Automation
+
 ```bash
 npm run test:e2e
 ```
+
 - **Test 1:** Loads synthetic demo project ("AeroTech Apparel"), inspects contract clauses, views chunked evidence, reviews scope findings, and opens change order workspace (2.6s).
 - **Test 2:** Exercises Tiger Cloud telemetry dashboard, settings backup, and project deletion lifecycle with 0 console errors (1.5s).
 
 ---
 
 ## 3. Environment & Hardware Specifications
+
 - **Operating System:** macOS Darwin (arm64, Apple Silicon)
 - **Node.js:** v22+
 - **Ollama:** `gemma3:4b` (GGUF Q4_K_M, 4.3B parameters, digest `a2af6cc3eb7fa8be8504abaf9b04e88f17a119ec3f04a3addf55f92841195f5a`)
