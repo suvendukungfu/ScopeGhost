@@ -45,11 +45,11 @@ ScopeGhost audits client communication threads against signed project agreements
 
 ### Technology Stack
 
-- **Framework:** Next.js 15+ (App Router), React 19, TypeScript (Strict)
+- **Framework:** Next.js 16.4.0 (Turbopack, App Router), React 19, TypeScript 7 (Strict)
 - **Styling:** Tailwind CSS (Accessible light theme with slate/emerald tokens)
 - **Database:** Local SQLite via native `node:sqlite` (zero external C++ dependencies)
 - **LLM Inference:** Local Ollama API with a validated configurable model (`gemma3:4b` by default)
-- **Validation:** Zod 3.x for schema enforcement on API inputs and model outputs
+- **Validation:** Zod 4.x for schema enforcement on API inputs and model outputs
 - **Testing:** Vitest for unit/integration tests; Playwright for browser E2E flows
 - **CI:** GitHub Actions pipeline
 
